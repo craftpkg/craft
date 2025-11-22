@@ -47,6 +47,27 @@ impl InstallPackage {
         }
     }
 
+    pub fn satisfies(&self, version: &str) -> bool {
+        // If no version requirement is specified, any version satisfies
+        let Some(ref req_version) = self.version else {
+            return true;
+        };
+
+        // Try to parse the requirement as a semver requirement
+        let Ok(req) = semver::VersionReq::parse(req_version) else {
+            // If parsing fails, fall back to exact match
+            return req_version == version;
+        };
+
+        // Try to parse the candidate version
+        let Ok(ver) = semver::Version::parse(version) else {
+            return false;
+        };
+
+        // Check if the version satisfies the requirement
+        req.matches(&ver)
+    }
+
     pub fn is_git(&self) -> bool {
         self.name.starts_with("git:")
             || self.name.starts_with("git+ssh:")
@@ -149,5 +170,40 @@ mod tests {
         assert_eq!(pkg.name, "typescript");
         assert_eq!(pkg.version, Some("5.0.0".to_string()));
         assert!(pkg.is_dev);
+    }
+
+    #[test]
+    fn test_satisfies_exact() {
+        let pkg = InstallPackage::from_literal("react@17.0.2", false);
+        assert!(pkg.satisfies("17.0.2"));
+        assert!(!pkg.satisfies("17.0.1"));
+        assert!(!pkg.satisfies("18.0.0"));
+    }
+
+    #[test]
+    fn test_satisfies_caret() {
+        let pkg = InstallPackage::from_literal("react@^17.0.0", false);
+        assert!(pkg.satisfies("17.0.0"));
+        assert!(pkg.satisfies("17.0.2"));
+        assert!(pkg.satisfies("17.9.9"));
+        assert!(!pkg.satisfies("16.0.0"));
+        assert!(!pkg.satisfies("18.0.0"));
+    }
+
+    #[test]
+    fn test_satisfies_tilde() {
+        let pkg = InstallPackage::from_literal("react@~17.0.0", false);
+        assert!(pkg.satisfies("17.0.0"));
+        assert!(pkg.satisfies("17.0.5"));
+        assert!(!pkg.satisfies("17.1.0"));
+        assert!(!pkg.satisfies("18.0.0"));
+    }
+
+    #[test]
+    fn test_satisfies_any() {
+        let pkg = InstallPackage::from_literal("react", false);
+        assert!(pkg.satisfies("17.0.2"));
+        assert!(pkg.satisfies("18.0.0"));
+        assert!(pkg.satisfies("1.0.0"));
     }
 }

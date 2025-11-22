@@ -13,12 +13,6 @@ impl CraftManager {
     pub async fn handle_command(&self, command: Commands) -> contract::Result<()> {
         match command {
             Commands::Add { packages, dev } => {
-                let dep_type = if dev {
-                    "dev dependencies"
-                } else {
-                    "dependencies"
-                };
-
                 let mut pkgs = Vec::new();
 
                 for pkg in packages {

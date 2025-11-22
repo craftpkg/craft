@@ -19,17 +19,26 @@ impl NpmResolver {
         let resp = self.client.get(&url).send().await?;
         let npm_package = resp.json::<NpmPackage>().await?;
 
-        let version = if let Some(v) = &package.version {
-            v.clone()
+        // Determine version to use
+        let version = if let Some(ref req_version) = package.version {
+            // Find a version that satisfies the requirement
+            npm_package
+                .versions
+                .keys()
+                .find(|v| package.satisfies(v))
+                .context(format!(
+                    "Version {} not found for package {}",
+                    req_version, package.name
+                ))?
+                .clone()
         } else {
+            // Use latest version if no version specified
             npm_package
                 .dist_tags
                 .get("latest")
                 .context("No latest version found")?
                 .clone()
         };
-
-        // println!("{:?}", npm_package);
 
         let package_json = npm_package
             .versions
