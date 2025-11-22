@@ -44,6 +44,19 @@ impl Resolver {
         let filename = format!("{}-{}.tgz", artifact.name, artifact.version);
         let file_path = cache_dir.join(&filename);
 
+        // Check if file already exists
+        if file_path.exists() {
+            debug::info!(
+                "Package {} already downloaded at: {:?}",
+                artifact.name,
+                file_path
+            );
+            return Ok(DownloadArtifact {
+                key: artifact.to_cache_key(),
+                path: file_path,
+            });
+        }
+
         debug::info!("Downloading {} to: {:?}", artifact.name, file_path);
 
         self.network
