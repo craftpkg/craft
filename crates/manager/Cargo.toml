@@ -1,0 +1,10 @@
+[package]
+name = "manager"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cli = { path = "../cli" }
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["macros", "rt"] }
