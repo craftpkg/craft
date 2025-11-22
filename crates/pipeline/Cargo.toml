@@ -1,0 +1,12 @@
+[package]
+name = "pipeline"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+contract = { path = "../contract" }
+package = { path = "../package" }
+resolver = { path = "../resolver" }

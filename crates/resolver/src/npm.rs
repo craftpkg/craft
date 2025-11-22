@@ -29,6 +29,8 @@ impl NpmResolver {
                 .clone()
         };
 
+        // println!("{:?}", npm_package);
+
         let package_json = npm_package
             .versions
             .get(&version)
@@ -65,7 +67,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_react_latest() {
-        let pkg = InstallPackage::new("react".to_string(), None);
+        let pkg = InstallPackage::new("react".to_string(), None, false);
         let resolver = NpmResolver::new();
         let result = resolver.resolve(&pkg).await;
         assert!(result.is_ok());
@@ -81,7 +83,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_react_specific_version() {
-        let pkg = InstallPackage::new("react".to_string(), Some("17.0.2".to_string()));
+        let pkg = InstallPackage::new("react".to_string(), Some("17.0.2".to_string()), false);
         let resolver = NpmResolver::new();
         let result = resolver.resolve(&pkg).await;
         assert!(result.is_ok());
@@ -96,7 +98,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_invalid_package() {
-        let pkg = InstallPackage::new("invalid-package-name-12345".to_string(), None);
+        let pkg = InstallPackage::new("invalid-package-name-12345".to_string(), None, false);
         let resolver = NpmResolver::new();
         let result = resolver.resolve(&pkg).await;
         assert!(result.is_err());

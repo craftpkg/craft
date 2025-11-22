@@ -1,4 +1,7 @@
 use cli::Commands;
+use contract::Pipeline;
+use package::InstallPackage;
+use pipeline::InstallPipe;
 
 pub struct CraftManager;
 
@@ -7,7 +10,7 @@ impl CraftManager {
         Self
     }
 
-    pub async fn handle_command(&self, command: Commands) {
+    pub async fn handle_command(&self, command: Commands) -> contract::Result<()> {
         match command {
             Commands::Add { packages, dev } => {
                 let dep_type = if dev {
@@ -15,22 +18,36 @@ impl CraftManager {
                 } else {
                     "dependencies"
                 };
-                println!("Adding {} to package: {:?}", dep_type, packages);
+
+                let mut pkgs = Vec::new();
+
+                for pkg in packages {
+                    pkgs.push(InstallPackage::from_literal(&pkg, dev));
+                }
+
+                InstallPipe::new(pkgs).run().await?;
+
+                Ok(())
             }
             Commands::Remove { packages } => {
                 println!("Removing packages: {:?}", packages);
+                Ok(())
             }
             Commands::Run { script } => {
                 println!("Running script: {}", script);
+                Ok(())
             }
             Commands::Start => {
                 println!("Starting application...");
+                Ok(())
             }
             Commands::Test => {
                 println!("Running tests...");
+                Ok(())
             }
             Commands::Install => {
                 println!("Install All");
+                Ok(())
             }
         }
     }

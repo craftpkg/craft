@@ -5,6 +5,9 @@ edition = "2024"
 
 [dependencies]
 cli = { path = "../cli" }
+pipeline = { path = "../pipeline" }
+package = { path = "../package" }
+contract = { path = "../contract" }
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["macros", "rt"] }

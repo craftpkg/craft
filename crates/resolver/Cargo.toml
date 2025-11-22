@@ -7,6 +7,7 @@ edition = "2024"
 reqwest = { version = "0.11", features = ["json"] }
 tokio = { version = "1.0", features = ["full"] }
 package = { path = "../package" }
+contract = { path = "../contract" }
 anyhow = "1.0"
 
 [lints]
