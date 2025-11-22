@@ -24,6 +24,7 @@ pub enum Commands {
     },
     Start,
     Test,
+    Install,
 }
 
 impl Cli {
@@ -33,9 +34,6 @@ impl Cli {
 
     pub fn normalize(&self) -> Commands {
         match &self.command {
-            Some(Commands::Test) => Commands::Run {
-                script: "test".to_string(),
-            },
             Some(cmd) => match cmd {
                 Commands::Add { packages, dev } => Commands::Add {
                     packages: packages.clone(),
@@ -48,7 +46,10 @@ impl Cli {
                     script: script.clone(),
                 },
                 Commands::Start => Commands::Start,
-                Commands::Test => unreachable!(), // Handled above
+                Commands::Test => Commands::Run {
+                    script: "test".to_string(),
+                },
+                Commands::Install => Commands::Install,
             },
             None => Commands::Start,
         }

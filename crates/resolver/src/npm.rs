@@ -1,6 +1,6 @@
 use crate::ResolvedArtifact;
 use anyhow::{Context, Result};
-use package::{NpmPackage, Package};
+use package::{InstallPackage, NpmPackage};
 use reqwest::Client;
 
 pub struct NpmResolver {
@@ -14,7 +14,7 @@ impl NpmResolver {
         }
     }
 
-    pub async fn resolve(&self, package: &Package) -> Result<ResolvedArtifact> {
+    pub async fn resolve(&self, package: &InstallPackage) -> Result<ResolvedArtifact> {
         let url = format!("https://registry.npmjs.org/{}", package.name);
         let resp = self.client.get(&url).send().await?;
         let npm_package = resp.json::<NpmPackage>().await?;
@@ -65,7 +65,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_react_latest() {
-        let pkg = Package::new("react".to_string(), None);
+        let pkg = InstallPackage::new("react".to_string(), None);
         let resolver = NpmResolver::new();
         let result = resolver.resolve(&pkg).await;
         assert!(result.is_ok());
@@ -81,7 +81,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_react_specific_version() {
-        let pkg = Package::new("react".to_string(), Some("17.0.2".to_string()));
+        let pkg = InstallPackage::new("react".to_string(), Some("17.0.2".to_string()));
         let resolver = NpmResolver::new();
         let result = resolver.resolve(&pkg).await;
         assert!(result.is_ok());
@@ -96,7 +96,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_invalid_package() {
-        let pkg = Package::new("invalid-package-name-12345".to_string(), None);
+        let pkg = InstallPackage::new("invalid-package-name-12345".to_string(), None);
         let resolver = NpmResolver::new();
         let result = resolver.resolve(&pkg).await;
         assert!(result.is_err());

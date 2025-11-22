@@ -29,6 +29,9 @@ impl CraftManager {
             Commands::Test => {
                 println!("Running tests...");
             }
+            Commands::Install => {
+                println!("Install All");
+            }
         }
     }
 }
