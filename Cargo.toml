@@ -1,15 +1,16 @@
 [workspace]
 members = [
-    "apps/craft",
-    "crates/manager",
-    "crates/package",
-    "crates/actor",
-    "crates/progress",
-    "crates/cli",
-    "crates/resolver",
-    "crates/pipeline",
-    "crates/contract",
-    "crates/debug",
+  "apps/craft",
+  "crates/manager",
+  "crates/package",
+  "crates/actor",
+  "crates/progress",
+  "crates/cli",
+  "crates/resolver",
+  "crates/pipeline",
+  "crates/contract",
+  "crates/debug",
+  "crates/network",
 ]
 resolver = "2"
 

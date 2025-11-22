@@ -1,23 +1,22 @@
 use crate::ResolvedArtifact;
 use anyhow::{Context, Result};
+use network::Network;
 use package::{InstallPackage, NpmPackage};
-use reqwest::Client;
 
 pub struct NpmResolver {
-    client: Client,
+    client: Network,
 }
 
 impl NpmResolver {
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: Network::new(),
         }
     }
 
     pub async fn resolve(&self, package: &InstallPackage) -> Result<ResolvedArtifact> {
         let url = format!("https://registry.npmjs.org/{}", package.name);
-        let resp = self.client.get(&url).send().await?;
-        let npm_package = resp.json::<NpmPackage>().await?;
+        let npm_package = self.client.fetch::<NpmPackage>(&url).await?;
 
         // Determine version to use
         let version = if let Some(ref req_version) = package.version {
@@ -56,11 +55,20 @@ impl NpmResolver {
             .tarball
             .clone();
 
-        Ok(ResolvedArtifact {
+        let resolved = ResolvedArtifact {
             name: package_json.name,
             version: package_json.version,
             download_url,
-        })
+        };
+
+        debug::trace!(
+            "Resolved package for {} {} - {:?}",
+            package.name,
+            package.version.clone().unwrap_or("".to_string()),
+            resolved
+        );
+
+        Ok(resolved)
     }
 }
 

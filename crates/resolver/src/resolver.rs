@@ -17,8 +17,14 @@ impl Resolver {
 
     pub async fn resolve(&self, package: &InstallPackage) -> Result<ResolvedArtifact> {
         if package.is_git() {
+            debug::info!("Resolving git package: {}", package.name);
             self.git_resolver.resolve(package)
         } else {
+            debug::info!(
+                "Resolving npm package: {} {}",
+                package.name,
+                package.version.clone().unwrap_or("".to_string()),
+            );
             self.npm_resolver.resolve(package).await
         }
     }

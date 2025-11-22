@@ -718,6 +718,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "network"
+version = "0.1.0"
+dependencies = [
+ "contract",
+ "reqwest",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -965,8 +975,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "contract",
+ "debug",
+ "network",
  "package",
- "reqwest",
  "tokio",
 ]
 
