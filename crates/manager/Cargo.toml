@@ -8,6 +8,7 @@ cli = { path = "../cli" }
 pipeline = { path = "../pipeline" }
 package = { path = "../package" }
 contract = { path = "../contract" }
+debug = { path = "../debug" }
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["macros", "rt"] }

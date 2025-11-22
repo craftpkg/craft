@@ -7,6 +7,8 @@ edition = "2024"
 cli = { path = "../../crates/cli" }
 manager = { path = "../../crates/manager" }
 contract = { path = "../../crates/contract" }
+debug = { path = "../../crates/debug" }
+
 tokio = { version = "1.0", features = ["full"] }
 
 [lints]

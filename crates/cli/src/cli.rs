@@ -1,10 +1,22 @@
+use std::fmt::Display;
+
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(name = "craft")]
+#[command(about = "A package manager CLI", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
+
+    #[arg(short, long, global = true)]
+    pub verbose: bool,
+}
+
+impl Display for Cli {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.command)
+    }
 }
 
 #[derive(Subcommand, Debug, PartialEq)]
@@ -25,6 +37,12 @@ pub enum Commands {
     Start,
     Test,
     Install,
+}
+
+impl Display for Commands {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl Cli {

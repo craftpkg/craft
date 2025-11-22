@@ -10,6 +10,16 @@ impl CraftManager {
         Self
     }
 
+    pub fn set_verbose(&self, verbose: bool) {
+        if verbose {
+            // SAFETY: We're setting a simple environment variable for this process only
+            // This is safe as we control the key and value, and it doesn't affect other threads
+            unsafe {
+                std::env::set_var(contract::CRAFT_VERBOSE, "1");
+            }
+        }
+    }
+
     pub async fn handle_command(&self, command: Commands) -> contract::Result<()> {
         match command {
             Commands::Add { packages, dev } => {
@@ -18,6 +28,8 @@ impl CraftManager {
                 for pkg in packages {
                     pkgs.push(InstallPackage::from_literal(&pkg, dev));
                 }
+
+                debug::trace!("Installing packages: {pkgs:?}");
 
                 InstallPipe::new(pkgs).run().await?;
 
@@ -62,13 +74,13 @@ mod tests {
     async fn test_handle_start_command() {
         let manager = CraftManager::new();
         // Just verifying it doesn't panic for now, as we are printing to stdout
-        manager.handle_command(Commands::Start).await;
+        let _ = manager.handle_command(Commands::Start).await;
     }
 
     #[tokio::test]
     async fn test_handle_add_command() {
         let manager = CraftManager::new();
-        manager
+        let _ = manager
             .handle_command(Commands::Add {
                 packages: vec!["react".to_string()],
                 dev: false,

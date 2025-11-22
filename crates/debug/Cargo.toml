@@ -1,5 +1,5 @@
 [package]
-name = "pipeline"
+name = "debug"
 version = "0.1.0"
 edition = "2024"
 
@@ -8,6 +8,5 @@ workspace = true
 
 [dependencies]
 contract = { path = "../contract" }
-package = { path = "../package" }
-resolver = { path = "../resolver" }
-debug = { path = "../debug" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -18,11 +18,10 @@ impl InstallPipe {
     }
 
     async fn resolve_package(&self, package: &InstallPackage) -> Result<ResolvedArtifact> {
+        debug::info!("Resolving package: {package:?}");
         let pkg = self.resolver.resolve(package).await?;
 
-        println!("Downloading {:?}", pkg);
-
-        return Ok(pkg);
+        Ok(pkg)
     }
 }
 
@@ -32,6 +31,6 @@ impl Pipeline<()> for InstallPipe {
             self.resolve_package(pkg).await?;
         }
 
-        return Ok(());
+        Ok(())
     }
 }
