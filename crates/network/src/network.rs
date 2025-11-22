@@ -16,7 +16,7 @@ impl Network {
         }
     }
 
-    /// Fetch JSON data from a URL and deserialize it into type T
+    /// Fetch JSON data from a URL and deserialize it into type [T]
     pub async fn fetch<T: DeserializeOwned>(&self, url: &str) -> Result<T> {
         let response = self.client.get(url).send().await?;
         let data = response.json::<T>().await?;

@@ -4,3 +4,9 @@ pub struct ResolvedArtifact {
     pub version: String,
     pub download_url: String,
 }
+
+impl ResolvedArtifact {
+    pub fn to_cache_key(&self) -> String {
+        format!("{}-{}", self.name, self.version)
+    }
+}

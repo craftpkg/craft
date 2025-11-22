@@ -1,8 +1,8 @@
 pub mod constants;
-pub mod errors;
-pub mod pipeline;
+mod errors;
+mod pipeline;
 
 pub use anyhow::Result;
-pub use constants::CRAFT_VERBOSE;
+pub use constants::{CRAFT_VERBOSE, get_package_cache_dir};
 pub use errors::PipelineError;
 pub use pipeline::Pipeline;

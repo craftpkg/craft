@@ -1,10 +1,12 @@
-use crate::{GitResolver, NpmResolver, ResolvedArtifact};
-use contract::Result;
+use crate::{GitResolver, NpmResolver, ResolvedArtifact, download_artifact::DownloadArtifact};
+use contract::{Result, get_package_cache_dir};
+use network::Network;
 use package::InstallPackage;
 
 pub struct Resolver {
     npm_resolver: NpmResolver,
     git_resolver: GitResolver,
+    network: Network,
 }
 
 impl Resolver {
@@ -12,6 +14,7 @@ impl Resolver {
         Self {
             npm_resolver: NpmResolver::new(),
             git_resolver: GitResolver::new(),
+            network: Network::new(),
         }
     }
 
@@ -27,6 +30,32 @@ impl Resolver {
             );
             self.npm_resolver.resolve(package).await
         }
+    }
+
+    pub async fn download(
+        &self,
+        artifact: &ResolvedArtifact,
+    ) -> contract::Result<DownloadArtifact> {
+        let cache_dir = get_package_cache_dir();
+
+        tokio::fs::create_dir_all(&cache_dir).await?;
+
+        // Construct the file path: ~/.craft/packages/{name}-{version}.tgz
+        let filename = format!("{}-{}.tgz", artifact.name, artifact.version);
+        let file_path = cache_dir.join(&filename);
+
+        debug::info!("Downloading {} to: {:?}", artifact.name, file_path);
+
+        self.network
+            .download(&artifact.download_url, file_path.clone())
+            .await?;
+
+        debug::info!("Successfully downloaded {}", artifact.name);
+
+        Ok(DownloadArtifact {
+            key: artifact.to_cache_key(),
+            path: file_path,
+        })
     }
 }
 

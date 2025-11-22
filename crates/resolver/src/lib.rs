@@ -1,3 +1,4 @@
+mod download_artifact;
 pub mod git;
 pub mod npm;
 pub mod resolved_artifact;

@@ -1,6 +1,6 @@
 pub use crate::{NpmPackage, PackageJson};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InstallPackage {
     pub name: String,
     pub version: Option<String>,
@@ -14,6 +14,14 @@ impl InstallPackage {
             version,
             is_dev,
         }
+    }
+
+    pub fn to_cache_key(&self) -> String {
+        format!(
+            "{}-{}",
+            self.name,
+            self.version.clone().unwrap_or("latest".to_string())
+        )
     }
 
     pub fn from_literal(package: &str, is_dev: bool) -> Self {

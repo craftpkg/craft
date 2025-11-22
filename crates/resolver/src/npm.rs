@@ -18,7 +18,6 @@ impl NpmResolver {
         let url = format!("https://registry.npmjs.org/{}", package.name);
         let npm_package = self.client.fetch::<NpmPackage>(&url).await?;
 
-        // Determine version to use
         let version = if let Some(ref req_version) = package.version {
             // Find a version that satisfies the requirement
             npm_package
