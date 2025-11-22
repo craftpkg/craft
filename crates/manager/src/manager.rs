@@ -33,6 +33,12 @@ impl CraftManager {
     }
 }
 
+impl Default for CraftManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

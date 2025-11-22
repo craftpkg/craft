@@ -12,7 +12,7 @@ impl Progress {
                 .template(
                     "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
                 )
-                .unwrap()
+                .expect("Invalid progress bar template")
                 .progress_chars("#>-"),
         );
         Self { pb }

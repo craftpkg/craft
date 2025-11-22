@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn test_add_packages() {
-        let cli = Cli::parse_from(&["craft", "add", "react", "express"]);
+        let cli = Cli::parse_from(["craft", "add", "react", "express"]);
         match cli.command {
             Some(Commands::Add { packages, dev }) => {
                 assert_eq!(packages, vec!["react", "express"]);
@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn test_add_dev_dependency() {
-        let cli = Cli::parse_from(&["craft", "add", "typescript", "-D"]);
+        let cli = Cli::parse_from(["craft", "add", "typescript", "-D"]);
         match cli.command {
             Some(Commands::Add { packages, dev }) => {
                 assert_eq!(packages, vec!["typescript"]);
@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn test_remove_packages() {
-        let cli = Cli::parse_from(&["craft", "remove", "react"]);
+        let cli = Cli::parse_from(["craft", "remove", "react"]);
         match cli.command {
             Some(Commands::Remove { packages }) => {
                 assert_eq!(packages, vec!["react"]);
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn test_run_script() {
-        let cli = Cli::parse_from(&["craft", "run", "build"]);
+        let cli = Cli::parse_from(["craft", "run", "build"]);
         match cli.command {
             Some(Commands::Run { script }) => {
                 assert_eq!(script, "build");
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn test_test_command() {
-        let cli = Cli::parse_from(&["craft", "test"]);
+        let cli = Cli::parse_from(["craft", "test"]);
         assert_eq!(cli.command, Some(Commands::Test));
 
         // Verify normalization
@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn test_default_command() {
-        let cli = Cli::parse_from(&["craft"]);
+        let cli = Cli::parse_from(["craft"]);
         assert_eq!(cli.command, None);
 
         // Verify normalization

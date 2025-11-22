@@ -7,3 +7,6 @@ edition = "2024"
 cli = { path = "../../crates/cli" }
 manager = { path = "../../crates/manager" }
 tokio = { version = "1.0", features = ["full"] }
+
+[lints]
+workspace = true

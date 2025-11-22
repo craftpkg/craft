@@ -8,3 +8,6 @@ cli = { path = "../cli" }
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["macros", "rt"] }
+
+[lints]
+workspace = true

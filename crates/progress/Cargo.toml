@@ -3,5 +3,8 @@ name = "progress"
 version = "0.1.0"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 indicatif = "0.18.3"

@@ -69,7 +69,7 @@ mod tests {
         let resolver = NpmResolver::new();
         let result = resolver.resolve(&pkg).await;
         assert!(result.is_ok());
-        let artifact = result.unwrap();
+        let artifact = result.expect("Failed to resolve react package");
         assert_eq!(artifact.name, "react");
         assert!(!artifact.version.is_empty());
         assert!(
@@ -85,7 +85,7 @@ mod tests {
         let resolver = NpmResolver::new();
         let result = resolver.resolve(&pkg).await;
         assert!(result.is_ok());
-        let artifact = result.unwrap();
+        let artifact = result.expect("Failed to resolve react 17.0.2");
         assert_eq!(artifact.name, "react");
         assert_eq!(artifact.version, "17.0.2");
         assert_eq!(
