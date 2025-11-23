@@ -40,25 +40,27 @@ impl Actor<AddActorPayload> for AddPackageActor {
 
         if package_json_path.exists() {
             let content = tokio::fs::read_to_string(&package_json_path).await?;
-            println!("Package.json content: {}", content);
             let mut package_json: PackageJson = serde_json::from_str(&content)?;
 
-            // Add packages to dependencies or devDependencies
-            for artifact in &artifacts {
-                if self.payload.is_dev {
-                    // Add to devDependencies
-                    let dev_deps = package_json
-                        .dev_dependencies
-                        .get_or_insert_with(|| std::collections::HashMap::new());
-                    dev_deps.insert(artifact.name.clone(), format!("^{}", artifact.version));
-                    debug::info!("Added {} to devDependencies", artifact.name);
-                } else {
-                    // Add to dependencies
-                    let deps = package_json
-                        .dependencies
-                        .get_or_insert_with(|| std::collections::HashMap::new());
-                    deps.insert(artifact.name.clone(), format!("^{}", artifact.version));
-                    debug::info!("Added {} to dependencies", artifact.name);
+            // Add only the explicitly requested packages to dependencies or devDependencies
+            for pkg_name in &self.payload.packages {
+                // Find the corresponding artifact for this package
+                if let Some(artifact) = artifacts.iter().find(|a| &a.name == pkg_name) {
+                    if self.payload.is_dev {
+                        // Add to devDependencies
+                        let dev_deps = package_json
+                            .dev_dependencies
+                            .get_or_insert_with(|| std::collections::HashMap::new());
+                        dev_deps.insert(artifact.name.clone(), format!("^{}", artifact.version));
+                        debug::info!("Added {} to devDependencies", artifact.name);
+                    } else {
+                        // Add to dependencies
+                        let deps = package_json
+                            .dependencies
+                            .get_or_insert_with(|| std::collections::HashMap::new());
+                        deps.insert(artifact.name.clone(), format!("^{}", artifact.version));
+                        debug::info!("Added {} to dependencies", artifact.name);
+                    }
                 }
             }
 
