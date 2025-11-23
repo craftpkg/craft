@@ -7,3 +7,8 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+contract = { path = "../contract" }
+pipeline = { path = "../pipeline" }
+package = { path = "../package" }
+debug = { path = "../debug" }
+tokio = { version = "1.48.0", features = ["full"] }

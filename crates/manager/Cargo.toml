@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 cli = { path = "../cli" }
-pipeline = { path = "../pipeline" }
+actor = { path = "../actor" }
 package = { path = "../package" }
 contract = { path = "../contract" }
 debug = { path = "../debug" }

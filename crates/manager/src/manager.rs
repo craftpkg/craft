@@ -1,7 +1,7 @@
+use actor::{AddActorPayload, AddPackageActor};
 use cli::Commands;
-use contract::Pipeline;
+use contract::{Actor, Pipeline};
 use package::InstallPackage;
-use pipeline::InstallPipe;
 
 pub struct CraftManager;
 
@@ -23,18 +23,12 @@ impl CraftManager {
     pub async fn handle_command(&self, command: Commands) -> contract::Result<()> {
         match command {
             Commands::Add { packages, dev } => {
-                let mut pkgs = Vec::new();
-
-                for pkg in packages {
-                    pkgs.push(InstallPackage::from_literal(&pkg, dev));
-                }
-
-                debug::trace!("Installing packages: {pkgs:?}");
-
-                let artifacts = InstallPipe::new(pkgs.clone()).run().await?;
-                pipeline::LinkerPipe::new(artifacts, pkgs).run().await?;
-
-                Ok(())
+                AddPackageActor::with(AddActorPayload {
+                    packages,
+                    is_dev: dev,
+                })
+                .run()
+                .await
             }
             Commands::Remove { packages } => {
                 println!("Removing packages: {:?}", packages);
