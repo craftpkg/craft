@@ -5,7 +5,7 @@ all: build test lint
 build:
 	cargo build
 
-test: test-pkg
+test:
 	cargo test
 
 lint:
