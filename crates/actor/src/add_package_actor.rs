@@ -1,7 +1,5 @@
-use std::fmt::Display;
-
 use contract::{Actor, Pipeline};
-use package::InstallPackage;
+use package::{InstallPackage, PackageJson};
 use pipeline::{InstallPipe, LinkerPipe};
 
 #[derive(Debug)]
@@ -10,7 +8,7 @@ pub struct AddActorPayload {
     pub is_dev: bool,
 }
 
-impl Display for AddActorPayload {
+impl std::fmt::Display for AddActorPayload {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.packages.join(" "))
     }
@@ -32,10 +30,43 @@ impl Actor<AddActorPayload> for AddPackageActor {
             pkgs.push(InstallPackage::from_literal(pkg, self.payload.is_dev));
         }
 
-        debug::trace!("Installing packages: {pkgs:?}");
-
         let artifacts = InstallPipe::new(pkgs.clone()).run().await?;
-        LinkerPipe::new(artifacts, pkgs).run().await?;
+
+        LinkerPipe::new(artifacts.clone(), pkgs).run().await?;
+
+        // Update package.json if it exists
+        let cwd = std::env::current_dir()?;
+        let package_json_path = cwd.join("package.json");
+
+        if package_json_path.exists() {
+            let content = tokio::fs::read_to_string(&package_json_path).await?;
+            println!("Package.json content: {}", content);
+            let mut package_json: PackageJson = serde_json::from_str(&content)?;
+
+            // Add packages to dependencies or devDependencies
+            for artifact in &artifacts {
+                if self.payload.is_dev {
+                    // Add to devDependencies
+                    let dev_deps = package_json
+                        .dev_dependencies
+                        .get_or_insert_with(|| std::collections::HashMap::new());
+                    dev_deps.insert(artifact.name.clone(), format!("^{}", artifact.version));
+                    debug::info!("Added {} to devDependencies", artifact.name);
+                } else {
+                    // Add to dependencies
+                    let deps = package_json
+                        .dependencies
+                        .get_or_insert_with(|| std::collections::HashMap::new());
+                    deps.insert(artifact.name.clone(), format!("^{}", artifact.version));
+                    debug::info!("Added {} to dependencies", artifact.name);
+                }
+            }
+
+            // Write updated package.json
+            let updated_content = serde_json::to_string_pretty(&package_json)?;
+            tokio::fs::write(&package_json_path, updated_content).await?;
+            debug::info!("Updated package.json");
+        }
 
         Ok(())
     }

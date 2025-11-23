@@ -223,6 +223,7 @@ impl Pipeline<()> for LinkerPipe {
             result?;
         }
 
+        debug::trace!("LINKED NON_ROOT PACKAGES");
         // 2. Link root packages to project node_modules
         let root_packages = self.root_packages.clone();
         let linking_results: Vec<Result<()>> = stream::iter(root_packages)

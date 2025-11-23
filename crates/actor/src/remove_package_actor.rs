@@ -1,4 +1,5 @@
 use contract::{Actor, Result};
+use package::PackageJson;
 use tokio::fs;
 
 #[derive(Debug)]
@@ -40,26 +41,22 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
 
         if package_json_path.exists() {
             let content = fs::read_to_string(&package_json_path).await?;
-            let mut package_json: serde_json::Value = serde_json::from_str(&content)?;
+            let mut package_json: PackageJson = serde_json::from_str(&content)?;
 
             // Remove from dependencies
-            if let Some(deps) = package_json.get_mut("dependencies") {
-                if let Some(deps_obj) = deps.as_object_mut() {
-                    for package_name in &self.payload.packages {
-                        if deps_obj.remove(package_name).is_some() {
-                            debug::info!("Removed {} from dependencies", package_name);
-                        }
+            if let Some(deps) = &mut package_json.dependencies {
+                for package_name in &self.payload.packages {
+                    if deps.remove(package_name).is_some() {
+                        debug::info!("Removed {} from dependencies", package_name);
                     }
                 }
             }
 
             // Remove from devDependencies
-            if let Some(dev_deps) = package_json.get_mut("devDependencies") {
-                if let Some(dev_deps_obj) = dev_deps.as_object_mut() {
-                    for package_name in &self.payload.packages {
-                        if dev_deps_obj.remove(package_name).is_some() {
-                            debug::info!("Removed {} from devDependencies", package_name);
-                        }
+            if let Some(dev_deps) = &mut package_json.dev_dependencies {
+                for package_name in &self.payload.packages {
+                    if dev_deps.remove(package_name).is_some() {
+                        debug::info!("Removed {} from devDependencies", package_name);
                     }
                 }
             }

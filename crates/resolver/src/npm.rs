@@ -17,7 +17,13 @@ impl NpmResolver {
 
     pub async fn resolve(&self, package: &InstallPackage) -> Result<ResolvedArtifact> {
         let url = format!("https://registry.npmjs.org/{}", package.name);
-        let npm_package = self.client.fetch::<NpmPackage>(&url).await?;
+        let npm_package = match self.client.fetch::<NpmPackage>(&url).await {
+            Ok(package) => package,
+            Err(e) => {
+                debug::error!("Failed to fetch npm package: {} {}", url, e);
+                return Err(e);
+            }
+        };
 
         let version = if let Some(ref req_version) = package.version {
             // Find a version that satisfies the requirement
@@ -54,17 +60,22 @@ impl NpmResolver {
             .ok_or_else(|| anyhow::anyhow!("Dist info not found"))?;
 
         let resolved = ResolvedArtifact {
-            name: pkg_json.name.clone(),
-            version: pkg_json.version.clone(),
+            name: pkg_json
+                .name
+                .clone()
+                .expect("Resolved package should have name property"),
+            version: pkg_json
+                .version
+                .clone()
+                .expect("Resolved package should have version property"),
             download_url: dist.tarball.clone(),
             package: Some(pkg_json.clone()),
         };
 
         debug::trace!(
-            "Resolved package for {} {} - {:?}",
+            "Resolved package for {} {}",
             package.name,
             package.version.clone().unwrap_or("".to_string()),
-            resolved
         );
 
         Ok(resolved)
