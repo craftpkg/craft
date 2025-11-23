@@ -59,6 +59,10 @@ impl Resolver {
 
         debug::info!("Downloading {} to: {:?}", artifact.name, file_path);
 
+        if let Some(parent) = file_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
         self.network
             .download(&artifact.download_url, file_path.clone())
             .await?;

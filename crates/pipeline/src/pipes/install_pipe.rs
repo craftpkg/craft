@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use contract::{Pipeline, Result, get_package_cache_dir};
@@ -14,6 +14,8 @@ pub struct InstallPipe {
     // - None means resolution is in progress
     // - Some(artifact) means resolution is complete
     locked_packages: Arc<Mutex<HashMap<String, Arc<Mutex<Option<ResolvedArtifact>>>>>>,
+    // Lock for unzipping artifacts to prevent race conditions
+    unzip_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 impl InstallPipe {
@@ -22,6 +24,7 @@ impl InstallPipe {
             packages,
             resolver: Resolver::new(),
             locked_packages: Arc::new(Mutex::new(HashMap::new())),
+            unzip_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -66,9 +69,26 @@ impl InstallPipe {
         // Release lock before recursion to avoid deadlocks
         drop(artifact_slot);
 
+        // Synchronize unzipping
+        let unzip_key = format!("{}@{}", artifact.name, artifact.version);
+        let unzip_lock = {
+            let mut locks = self.unzip_locks.lock().await;
+            locks
+                .entry(unzip_key)
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
+        };
+        let _unzip_guard = unzip_lock.lock().await;
+
         let unzip_dir =
             get_package_cache_dir().join(format!("{}-{}", artifact.name, artifact.version));
-        unzip(download_artifact.path, unzip_dir).await?;
+
+        if !unzip_dir.exists() {
+            unzip(download_artifact.path, unzip_dir).await?;
+        } else {
+            debug::info!("Package {} already unzipped", artifact.name);
+        }
+        drop(_unzip_guard);
 
         if let Some(pkg_json) = artifact.package {
             if let Some(deps) = pkg_json.dependencies {
@@ -96,8 +116,8 @@ impl InstallPipe {
     }
 }
 
-impl Pipeline<()> for InstallPipe {
-    async fn run(&self) -> Result<()> {
+impl Pipeline<Vec<ResolvedArtifact>> for InstallPipe {
+    async fn run(&self) -> Result<Vec<ResolvedArtifact>> {
         debug::trace!("Installing packages: {pkgs:?}", pkgs = self.packages);
 
         // Clone packages to avoid lifetime issues with async closures
@@ -126,6 +146,22 @@ impl Pipeline<()> for InstallPipe {
             result?;
         }
 
-        Ok(())
+        // Collect all resolved artifacts and deduplicate
+        let locked = self.locked_packages.lock().await;
+        let mut artifacts = Vec::new();
+        let mut seen = HashSet::new();
+
+        for lock in locked.values() {
+            let artifact_guard = lock.lock().await;
+            if let Some(artifact) = artifact_guard.as_ref() {
+                let key = format!("{}@{}", artifact.name, artifact.version);
+                if !seen.contains(&key) {
+                    seen.insert(key);
+                    artifacts.push(artifact.clone());
+                }
+            }
+        }
+
+        Ok(artifacts)
     }
 }

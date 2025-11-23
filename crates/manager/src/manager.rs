@@ -31,7 +31,8 @@ impl CraftManager {
 
                 debug::trace!("Installing packages: {pkgs:?}");
 
-                InstallPipe::new(pkgs).run().await?;
+                let artifacts = InstallPipe::new(pkgs.clone()).run().await?;
+                pipeline::LinkerPipe::new(artifacts, pkgs).run().await?;
 
                 Ok(())
             }

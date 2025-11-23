@@ -5,7 +5,7 @@ all: build test lint
 build:
 	cargo build
 
-test:
+test: test-pkg
 	cargo test
 
 lint:
@@ -13,6 +13,10 @@ lint:
 
 craft:
 	cargo run -p craft -- $(filter-out $@,$(MAKECMDGOALS))
+
+test-pkg:
+	@make craft add @tanstack/react-query react express -- --verbose
+	@node main.js
 
 %:
 	@:

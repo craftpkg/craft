@@ -1025,6 +1025,7 @@ dependencies = [
  "contract",
  "debug",
  "futures",
+ "node-semver",
  "package",
  "resolver",
  "tarball",
