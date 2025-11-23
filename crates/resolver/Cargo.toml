@@ -10,6 +10,7 @@ contract = { path = "../contract" }
 network = { path = "../network" }
 debug = { path = "../debug" }
 anyhow = "1.0"
+node-semver = "2.0"
 
 [lints]
 workspace = true

@@ -11,6 +11,7 @@ members = [
   "crates/contract",
   "crates/debug",
   "crates/network",
+  "crates/tarball",
 ]
 resolver = "2"
 

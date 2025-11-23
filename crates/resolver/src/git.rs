@@ -13,12 +13,13 @@ impl GitResolver {
         let git_url = &package.name;
 
         // Parse git URL to extract repository information
-        let (name, version, download_url) = self.parse_git_url(git_url)?;
+        let (name, _, download_url) = self.parse_git_url(git_url)?;
 
         Ok(ResolvedArtifact {
-            name,
-            version,
-            download_url,
+            name: name.to_string(),
+            version: "git".to_string(),
+            download_url: download_url.to_string(),
+            package: None,
         })
     }
 

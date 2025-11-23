@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use contract::{Pipeline, Result};
+use contract::{Pipeline, Result, get_package_cache_dir};
 use futures::stream::{self, StreamExt};
 use package::InstallPackage;
 use resolver::{ResolvedArtifact, Resolver};
+use tarball::gzip::unzip;
 use tokio::sync::Mutex;
 
 pub struct InstallPipe {
@@ -24,7 +25,8 @@ impl InstallPipe {
         }
     }
 
-    async fn resolve_package(&self, package: &InstallPackage) -> Result<ResolvedArtifact> {
+    #[async_recursion::async_recursion]
+    async fn resolve_package(&self, package: &InstallPackage) -> Result<()> {
         debug::info!("Resolving package: {package:?}");
 
         let cache_key = package.to_cache_key();
@@ -48,20 +50,49 @@ impl InstallPipe {
         let mut artifact_slot = package_lock.lock().await;
 
         // If already resolved by another thread, return it
-        if let Some(artifact) = artifact_slot.as_ref() {
+        if let Some(_artifact) = artifact_slot.as_ref() {
             debug::info!("Package {} already resolved by another thread", cache_key);
-            return Ok(artifact.clone());
+            return Ok(());
         }
 
         // This thread won the race - do the actual work
         debug::info!("This thread will resolve {}", cache_key);
         let artifact = self.resolver.resolve(package).await?;
-        self.resolver.download(&artifact).await?;
+        let download_artifact = self.resolver.download(&artifact).await?;
 
         // Store the result so other threads can use it
         *artifact_slot = Some(artifact.clone());
 
-        Ok(artifact)
+        // Release lock before recursion to avoid deadlocks
+        drop(artifact_slot);
+
+        let unzip_dir =
+            get_package_cache_dir().join(format!("{}-{}", artifact.name, artifact.version));
+        unzip(download_artifact.path, unzip_dir).await?;
+
+        if let Some(pkg_json) = artifact.package {
+            if let Some(deps) = pkg_json.dependencies {
+                debug::info!("Installing dependencies for {}: {:?}", artifact.name, deps);
+
+                let dep_packages: Vec<InstallPackage> = deps
+                    .into_iter()
+                    .map(|(name, version)| InstallPackage::new(name, Some(version), false))
+                    .collect();
+
+                // Process dependencies in parallel
+                let results: Vec<Result<()>> = stream::iter(dep_packages)
+                    .map(|pkg| async move { self.resolve_package(&pkg).await })
+                    .buffer_unordered(10) // Concurrency limit for dependencies
+                    .collect()
+                    .await;
+
+                for result in results {
+                    result?;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -84,7 +115,7 @@ impl Pipeline<()> for InstallPipe {
         );
 
         // Process packages in parallel with dynamic concurrency limit
-        let results: Vec<Result<ResolvedArtifact>> = stream::iter(packages)
+        let results: Vec<Result<()>> = stream::iter(packages)
             .map(|pkg| async move { self.resolve_package(&pkg).await })
             .buffer_unordered(concurrency)
             .collect()

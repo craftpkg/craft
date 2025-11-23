@@ -1,6 +1,7 @@
 use crate::ResolvedArtifact;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use network::Network;
+use node_semver::{Range, Version};
 use package::{InstallPackage, NpmPackage};
 
 pub struct NpmResolver {
@@ -23,41 +24,40 @@ impl NpmResolver {
             npm_package
                 .versions
                 .keys()
-                .find(|v| package.satisfies(v))
-                .context(format!(
-                    "Version {} not found for package {}",
-                    req_version, package.name
-                ))?
-                .clone()
+                .filter(|v| {
+                    let req = Range::parse(req_version).unwrap();
+                    let ver = Version::parse(v).unwrap();
+                    req.satisfies(&ver)
+                })
+                .max_by(|a, b| {
+                    let ver_a = Version::parse(a).unwrap();
+                    let ver_b = Version::parse(b).unwrap();
+                    ver_a.partial_cmp(&ver_b).unwrap()
+                })
+                .cloned()
         } else {
-            // Use latest version if no version specified
-            npm_package
-                .dist_tags
-                .get("latest")
-                .context("No latest version found")?
-                .clone()
+            // Use latest version from dist-tags
+            npm_package.dist_tags.get("latest").cloned()
         };
 
-        let package_json = npm_package
+        let version = version
+            .ok_or_else(|| anyhow::anyhow!("Version not found for package {}", package.name))?;
+
+        let pkg_json = npm_package
             .versions
             .get(&version)
-            .cloned()
-            .context(format!(
-                "Version {} not found for package {}",
-                version, package.name
-            ))?;
+            .ok_or_else(|| anyhow::anyhow!("Package JSON not found for version {}", version))?;
 
-        let download_url = package_json
+        let dist = pkg_json
             .dist
             .as_ref()
-            .context("No dist info found")?
-            .tarball
-            .clone();
+            .ok_or_else(|| anyhow::anyhow!("Dist info not found"))?;
 
         let resolved = ResolvedArtifact {
-            name: package_json.name,
-            version: package_json.version,
-            download_url,
+            name: pkg_json.name.clone(),
+            version: pkg_json.version.clone(),
+            download_url: dist.tarball.clone(),
+            package: Some(pkg_json.clone()),
         };
 
         debug::trace!(
