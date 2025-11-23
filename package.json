@@ -7,15 +7,17 @@
   },
   "keywords": [],
   "dependencies": {
+    "openai": "^6.9.1",
     "react": "^19.2.0",
+    "lodash": "^4.17.21",
     "express": "^5.1.0",
     "@tanstack/react-query": "^5.90.10"
   },
   "devDependencies": {
-    "typescript": "^5.7.2",
-    "eslint": "*"
+    "eslint": "*",
+    "typescript": "^5.7.2"
   },
   "license": "ISC",
-  "author": "",
-  "main": "main.js"
+  "main": "main.js",
+  "author": ""
 }

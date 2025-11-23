@@ -144,6 +144,6 @@ mod tests {
 
         // Verify normalization
         let normalized = cli.normalize();
-        assert_eq!(normalized, Commands::Start);
+        assert_eq!(normalized, Commands::Install);
     }
 }

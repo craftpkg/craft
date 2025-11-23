@@ -32,9 +32,12 @@ impl CraftManager {
                 .await
             }
             Commands::Remove { packages } => {
-                RemovePackageActor::with(RemoveActorPayload { packages })
-                    .run()
-                    .await
+                RemovePackageActor::with(RemoveActorPayload {
+                    packages,
+                    working_dir: None,
+                })
+                .run()
+                .await
             }
             Commands::Run { script } => {
                 println!("Running script: {}", script);

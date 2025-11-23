@@ -1,10 +1,12 @@
 use contract::{Actor, Result};
 use package::PackageJson;
+use std::path::PathBuf;
 use tokio::fs;
 
 #[derive(Debug)]
 pub struct RemoveActorPayload {
     pub packages: Vec<String>,
+    pub working_dir: Option<PathBuf>,
 }
 
 pub struct RemovePackageActor {
@@ -17,7 +19,10 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
     }
 
     async fn run(&self) -> Result<()> {
-        let cwd = std::env::current_dir()?;
+        let cwd =
+            self.payload.working_dir.clone().unwrap_or_else(|| {
+                std::env::current_dir().expect("Failed to get current directory")
+            });
         let node_modules = cwd.join("node_modules");
 
         // Remove packages from node_modules
@@ -74,12 +79,10 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
     #[tokio::test]
     async fn test_remove_package_actor_removes_from_node_modules() {
         let temp_dir = tempfile::tempdir().unwrap();
-        env::set_current_dir(&temp_dir).unwrap();
 
         // Create node_modules/test-package as a directory
         let node_modules = temp_dir.path().join("node_modules");
@@ -90,6 +93,7 @@ mod tests {
 
         let payload = RemoveActorPayload {
             packages: vec!["test-package".to_string()],
+            working_dir: Some(temp_dir.path().to_path_buf()),
         };
 
         let actor = RemovePackageActor::with(payload);
@@ -102,7 +106,6 @@ mod tests {
     #[tokio::test]
     async fn test_remove_package_actor_updates_package_json() {
         let temp_dir = tempfile::tempdir().unwrap();
-        env::set_current_dir(&temp_dir).unwrap();
 
         // Create package.json with dependencies
         let package_json = r#"{
@@ -122,6 +125,7 @@ mod tests {
 
         let payload = RemoveActorPayload {
             packages: vec!["react".to_string(), "typescript".to_string()],
+            working_dir: Some(temp_dir.path().to_path_buf()),
         };
 
         let actor = RemovePackageActor::with(payload);
@@ -148,13 +152,13 @@ mod tests {
     #[tokio::test]
     async fn test_remove_package_actor_handles_missing_package() {
         let temp_dir = tempfile::tempdir().unwrap();
-        env::set_current_dir(&temp_dir).unwrap();
 
         let node_modules = temp_dir.path().join("node_modules");
         fs::create_dir_all(&node_modules).await.unwrap();
 
         let payload = RemoveActorPayload {
             packages: vec!["nonexistent-package".to_string()],
+            working_dir: Some(temp_dir.path().to_path_buf()),
         };
 
         let actor = RemovePackageActor::with(payload);
@@ -168,6 +172,7 @@ mod tests {
     fn test_remove_actor_payload_creation() {
         let payload = RemoveActorPayload {
             packages: vec!["test".to_string()],
+            working_dir: None,
         };
 
         assert_eq!(payload.packages.len(), 1);
