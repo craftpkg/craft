@@ -1,7 +1,6 @@
-use actor::{AddActorPayload, AddPackageActor};
+use actor::{AddActorPayload, AddPackageActor, InstallActor};
 use cli::Commands;
-use contract::{Actor, Pipeline};
-use package::InstallPackage;
+use contract::Actor;
 
 pub struct CraftManager;
 
@@ -46,10 +45,7 @@ impl CraftManager {
                 println!("Running tests...");
                 Ok(())
             }
-            Commands::Install => {
-                println!("Install All");
-                Ok(())
-            }
+            Commands::Install => InstallActor::with(()).run().await,
         }
     }
 }

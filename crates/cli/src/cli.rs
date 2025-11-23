@@ -69,7 +69,7 @@ impl Cli {
                 },
                 Commands::Install => Commands::Install,
             },
-            None => Commands::Start,
+            None => Commands::Install,
         }
     }
 }

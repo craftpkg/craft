@@ -8,5 +8,11 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": ""
+  "description": "",
+  "dependencies": {
+    "react": "^19.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
 }
