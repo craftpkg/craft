@@ -46,3 +46,28 @@ impl Actor<()> for InstallActor {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    #[tokio::test]
+    async fn test_install_actor_no_package_json() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        env::set_current_dir(&temp_dir).unwrap();
+
+        let actor = InstallActor::with(());
+        let result = actor.run().await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "no package.json found");
+    }
+
+    #[test]
+    fn test_install_actor_creation() {
+        let actor = InstallActor::with(());
+        // Just verify it can be created
+        drop(actor);
+    }
+}

@@ -40,3 +40,30 @@ impl Actor<AddActorPayload> for AddPackageActor {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add_actor_payload_display() {
+        let payload = AddActorPayload {
+            packages: vec!["react".to_string(), "lodash".to_string()],
+            is_dev: false,
+        };
+
+        assert_eq!(format!("{}", payload), "react lodash");
+    }
+
+    #[test]
+    fn test_add_actor_creation() {
+        let payload = AddActorPayload {
+            packages: vec!["test".to_string()],
+            is_dev: true,
+        };
+
+        let actor = AddPackageActor::with(payload);
+        assert_eq!(actor.payload.packages.len(), 1);
+        assert_eq!(actor.payload.is_dev, true);
+    }
+}

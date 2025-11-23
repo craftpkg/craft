@@ -1,4 +1,6 @@
-use actor::{AddActorPayload, AddPackageActor, InstallActor};
+use actor::{
+    AddActorPayload, AddPackageActor, InstallActor, RemoveActorPayload, RemovePackageActor,
+};
 use cli::Commands;
 use contract::Actor;
 
@@ -30,8 +32,9 @@ impl CraftManager {
                 .await
             }
             Commands::Remove { packages } => {
-                println!("Removing packages: {:?}", packages);
-                Ok(())
+                RemovePackageActor::with(RemoveActorPayload { packages })
+                    .run()
+                    .await
             }
             Commands::Run { script } => {
                 println!("Running script: {}", script);

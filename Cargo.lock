@@ -12,6 +12,7 @@ dependencies = [
  "package",
  "pipeline",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

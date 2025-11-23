@@ -1,18 +1,16 @@
 {
-  "name": "craft",
-  "version": "1.0.0",
+  "author": "",
+  "dependencies": {},
+  "description": "",
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  },
+  "keywords": [],
+  "license": "ISC",
   "main": "main.js",
+  "name": "craft",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "dependencies": {
-    "react": "^19.2.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.7.2"
-  }
+  "version": "1.0.0"
 }
