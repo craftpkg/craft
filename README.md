@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.png" alt="Craft Logo" width="200" />
+</p>
+
 # 📦 Craft Package Manager
 
 ![CI](https://github.com/craftpkg/craft/actions/workflows/ci.yml/badge.svg)
