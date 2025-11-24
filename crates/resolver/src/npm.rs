@@ -4,6 +4,7 @@ use network::Network;
 use node_semver::{Range, Version};
 use package::{InstallPackage, NpmPackage};
 
+#[derive(Debug)]
 pub struct NpmResolver {
     client: Network,
 }
@@ -31,14 +32,14 @@ impl NpmResolver {
                 .versions
                 .keys()
                 .filter(|v| {
-                    let req = Range::parse(req_version).unwrap();
-                    let ver = Version::parse(v).unwrap();
+                    let req = Range::parse(req_version).expect("should not panic");
+                    let ver = Version::parse(v).expect("should not panic");
                     req.satisfies(&ver)
                 })
                 .max_by(|a, b| {
-                    let ver_a = Version::parse(a).unwrap();
-                    let ver_b = Version::parse(b).unwrap();
-                    ver_a.partial_cmp(&ver_b).unwrap()
+                    let ver_a = Version::parse(a).expect("should not panic");
+                    let ver_b = Version::parse(b).expect("should not panic");
+                    ver_a.partial_cmp(&ver_b).expect("should not panic")
                 })
                 .cloned()
         } else {

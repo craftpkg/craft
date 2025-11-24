@@ -2,6 +2,7 @@ use crate::ResolvedArtifact;
 use anyhow::{Context, Result};
 use package::InstallPackage;
 
+#[derive(Debug)]
 pub struct GitResolver;
 
 impl GitResolver {

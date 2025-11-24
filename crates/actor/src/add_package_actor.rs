@@ -50,14 +50,14 @@ impl Actor<AddActorPayload> for AddPackageActor {
                         // Add to devDependencies
                         let dev_deps = package_json
                             .dev_dependencies
-                            .get_or_insert_with(|| std::collections::HashMap::new());
+                            .get_or_insert_with(std::collections::HashMap::new);
                         dev_deps.insert(artifact.name.clone(), format!("^{}", artifact.version));
                         debug::info!("Added {} to devDependencies", artifact.name);
                     } else {
                         // Add to dependencies
                         let deps = package_json
                             .dependencies
-                            .get_or_insert_with(|| std::collections::HashMap::new());
+                            .get_or_insert_with(std::collections::HashMap::new);
                         deps.insert(artifact.name.clone(), format!("^{}", artifact.version));
                         debug::info!("Added {} to dependencies", artifact.name);
                     }

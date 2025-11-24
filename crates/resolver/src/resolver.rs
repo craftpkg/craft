@@ -3,6 +3,7 @@ use contract::{Result, get_package_cache_dir};
 use network::Network;
 use package::InstallPackage;
 
+#[derive(Debug)]
 pub struct Resolver {
     npm_resolver: NpmResolver,
     git_resolver: GitResolver,

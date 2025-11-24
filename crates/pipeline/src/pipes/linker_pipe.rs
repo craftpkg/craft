@@ -33,59 +33,61 @@ impl LinkerPipe {
             get_package_cache_dir().join(format!("{}-{}/package", artifact.name, artifact.version));
 
         // Link dependencies into the artifact's node_modules
-        if let Some(pkg_json) = &artifact.package {
-            if let Some(deps) = &pkg_json.dependencies {
-                let artifact_node_modules = source_dir.join("node_modules");
-                fs::create_dir_all(&artifact_node_modules).await?;
+        if let Some(deps) = artifact
+            .package
+            .as_ref()
+            .and_then(|p| p.dependencies.as_ref())
+        {
+            let artifact_node_modules = source_dir.join("node_modules");
+            fs::create_dir_all(&artifact_node_modules).await?;
 
-                for (dep_name, dep_version) in deps {
-                    // Find best matching artifact
-                    if let Some(candidates) = artifact_map.get(dep_name) {
-                        let req = Range::parse(dep_version).unwrap_or_else(|_| Range::any());
+            for (dep_name, dep_version) in deps {
+                // Find best matching artifact
+                if let Some(candidates) = artifact_map.get(dep_name) {
+                    let req = Range::parse(dep_version).unwrap_or_else(|_| Range::any());
 
-                        // Find the candidate that satisfies the version requirement
-                        // We prefer the highest version that satisfies it
-                        let best_match = candidates
-                            .iter()
-                            .filter(|c| {
-                                if let Ok(ver) = Version::parse(&c.version) {
-                                    req.satisfies(&ver)
-                                } else {
-                                    false
-                                }
-                            })
-                            .max_by(|a, b| {
-                                let ver_a = Version::parse(&a.version).unwrap();
-                                let ver_b = Version::parse(&b.version).unwrap();
-                                ver_a.partial_cmp(&ver_b).unwrap()
-                            });
-
-                        if let Some(dep_artifact) = best_match {
-                            let dep_source_dir = get_package_cache_dir().join(format!(
-                                "{}-{}/package",
-                                dep_artifact.name, dep_artifact.version
-                            ));
-                            let dep_dest_path = artifact_node_modules.join(dep_name);
-
-                            // Create parent dirs for scoped packages
-                            if let Some(parent) = dep_dest_path.parent() {
-                                fs::create_dir_all(parent).await?;
+                    // Find the candidate that satisfies the version requirement
+                    // We prefer the highest version that satisfies it
+                    let best_match = candidates
+                        .iter()
+                        .filter(|c| {
+                            if let Ok(ver) = Version::parse(&c.version) {
+                                req.satisfies(&ver)
+                            } else {
+                                false
                             }
+                        })
+                        .max_by(|a, b| {
+                            let ver_a = Version::parse(&a.version).expect("should not panic");
+                            let ver_b = Version::parse(&b.version).expect("should not panic");
+                            ver_a.partial_cmp(&ver_b).expect("should not panic")
+                        });
 
-                            // Remove existing link if exists
-                            if dep_dest_path.exists() {
-                                if dep_dest_path.is_symlink() {
-                                    fs::remove_file(&dep_dest_path).await?;
-                                } else {
-                                    fs::remove_dir_all(&dep_dest_path).await?;
-                                }
-                            }
+                    if let Some(dep_artifact) = best_match {
+                        let dep_source_dir = get_package_cache_dir().join(format!(
+                            "{}-{}/package",
+                            dep_artifact.name, dep_artifact.version
+                        ));
+                        let dep_dest_path = artifact_node_modules.join(dep_name);
 
-                            #[cfg(unix)]
-                            tokio::fs::symlink(&dep_source_dir, &dep_dest_path).await?;
-                            #[cfg(windows)]
-                            tokio::fs::symlink_dir(&dep_source_dir, &dep_dest_path).await?;
+                        // Create parent dirs for scoped packages
+                        if let Some(parent) = dep_dest_path.parent() {
+                            fs::create_dir_all(parent).await?;
                         }
+
+                        // Remove existing link if exists
+                        if dep_dest_path.exists() {
+                            if dep_dest_path.is_symlink() {
+                                fs::remove_file(&dep_dest_path).await?;
+                            } else {
+                                fs::remove_dir_all(&dep_dest_path).await?;
+                            }
+                        }
+
+                        #[cfg(unix)]
+                        tokio::fs::symlink(&dep_source_dir, &dep_dest_path).await?;
+                        #[cfg(windows)]
+                        tokio::fs::symlink_dir(&dep_source_dir, &dep_dest_path).await?;
                     }
                 }
             }
@@ -128,16 +130,16 @@ impl LinkerPipe {
                     }
                 })
                 .max_by(|a, b| {
-                    let ver_a = Version::parse(&a.version).unwrap();
-                    let ver_b = Version::parse(&b.version).unwrap();
-                    ver_a.partial_cmp(&ver_b).unwrap()
+                    let ver_a = Version::parse(&a.version).expect("should not panic");
+                    let ver_b = Version::parse(&b.version).expect("should not panic");
+                    ver_a.partial_cmp(&ver_b).expect("should not panic")
                 })
         } else {
             // If no version specified, pick the highest version available
             candidates.iter().max_by(|a, b| {
-                let ver_a = Version::parse(&a.version).unwrap();
-                let ver_b = Version::parse(&b.version).unwrap();
-                ver_a.partial_cmp(&ver_b).unwrap()
+                let ver_a = Version::parse(&a.version).expect("should not panic");
+                let ver_b = Version::parse(&b.version).expect("should not panic");
+                ver_a.partial_cmp(&ver_b).expect("should not panic")
             })
         };
 

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
+#[derive(Debug)]
 pub struct Network {
     client: Client,
 }

@@ -8,12 +8,14 @@ use resolver::{ResolvedArtifact, Resolver};
 use tarball::gzip::unzip;
 use tokio::sync::Mutex;
 
+type LockedPackage = Arc<Mutex<HashMap<String, Arc<Mutex<Option<ResolvedArtifact>>>>>>;
+
 pub struct InstallPipe {
     packages: Vec<InstallPackage>,
     resolver: Resolver,
     // - None means resolution is in progress
     // - Some(artifact) means resolution is complete
-    locked_packages: Arc<Mutex<HashMap<String, Arc<Mutex<Option<ResolvedArtifact>>>>>>,
+    locked_packages: LockedPackage,
     // Lock for unzipping artifacts to prevent race conditions
     unzip_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
@@ -90,25 +92,23 @@ impl InstallPipe {
         }
         drop(_unzip_guard);
 
-        if let Some(pkg_json) = artifact.package {
-            if let Some(deps) = pkg_json.dependencies {
-                debug::info!("Installing dependencies for {}: {:?}", artifact.name, deps);
+        if let Some(deps) = artifact.package.and_then(|p| p.dependencies) {
+            debug::info!("Installing dependencies for {}: {:?}", artifact.name, deps);
 
-                let dep_packages: Vec<InstallPackage> = deps
-                    .into_iter()
-                    .map(|(name, version)| InstallPackage::new(name, Some(version), false))
-                    .collect();
+            let dep_packages: Vec<InstallPackage> = deps
+                .into_iter()
+                .map(|(name, version)| InstallPackage::new(name, Some(version), false))
+                .collect();
 
-                // Process dependencies in parallel
-                let results: Vec<Result<()>> = stream::iter(dep_packages)
-                    .map(|pkg| async move { self.resolve_package(&pkg).await })
-                    .buffer_unordered(10) // Concurrency limit for dependencies
-                    .collect()
-                    .await;
+            // Process dependencies in parallel
+            let results: Vec<Result<()>> = stream::iter(dep_packages)
+                .map(|pkg| async move { self.resolve_package(&pkg).await })
+                .buffer_unordered(10) // Concurrency limit for dependencies
+                .collect()
+                .await;
 
-                for result in results {
-                    result?;
-                }
+            for result in results {
+                result?;
             }
         }
 
