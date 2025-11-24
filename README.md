@@ -21,7 +21,13 @@
 
 ## 🚀 Installation
 
-### From Binary (Recommended)
+### One-line Install (Recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/craftpkg/craft/main/install.sh | bash
+```
+
+### From Binary
 
 Download the latest release for your platform from the [Releases](https://github.com/craftpkg/craft/releases) page.
 
