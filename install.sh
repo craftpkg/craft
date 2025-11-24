@@ -31,7 +31,11 @@ fi
 DOWNLOAD_URL="https://github.com/craftpkg/craft/releases/latest/download/${ASSET_NAME}"
 
 echo "Downloading Craft for ${OS}/${ARCH}..."
-curl -L -o craft "${DOWNLOAD_URL}"
+if ! curl -L -o craft "${DOWNLOAD_URL}" --fail; then
+    echo "Error: Failed to download ${ASSET_NAME} from ${DOWNLOAD_URL}"
+    echo "Please ensure the release exists and the asset name is correct."
+    exit 1
+fi
 
 chmod +x craft
 
