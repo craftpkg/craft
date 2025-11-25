@@ -34,9 +34,21 @@ pub enum Commands {
     Run {
         script: String,
     },
+    Cache {
+        #[command(subcommand)]
+        command: CacheCommands,
+    },
     Start,
     Test,
     Install,
+}
+
+#[derive(Subcommand, Debug, PartialEq, Clone)]
+pub enum CacheCommands {
+    Clean {
+        #[arg(short, long)]
+        force: bool,
+    },
 }
 
 impl Display for Commands {
@@ -62,6 +74,9 @@ impl Cli {
                 },
                 Commands::Run { script } => Commands::Run {
                     script: script.clone(),
+                },
+                Commands::Cache { command } => Commands::Cache {
+                    command: command.clone(),
                 },
                 Commands::Start => Commands::Start,
                 Commands::Test => Commands::Run {

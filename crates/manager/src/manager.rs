@@ -1,8 +1,8 @@
 use actor::{
-    AddActorPayload, AddPackageActor, InstallActor, RemoveActorPayload, RemovePackageActor,
-    RunScriptActor, RunScriptActorPayload,
+    AddActorPayload, AddPackageActor, CleanCacheActor, CleanCacheActorPayload, InstallActor,
+    RemoveActorPayload, RemovePackageActor, RunScriptActor, RunScriptActorPayload,
 };
-use cli::Commands;
+use cli::{CacheCommands, Commands};
 use contract::Actor;
 
 pub struct CraftManager;
@@ -45,6 +45,13 @@ impl CraftManager {
                     .run()
                     .await
             }
+            Commands::Cache { command } => match command {
+                CacheCommands::Clean { force } => {
+                    CleanCacheActor::with(CleanCacheActorPayload { force })
+                        .run()
+                        .await
+                }
+            },
             Commands::Start => {
                 RunScriptActor::with(RunScriptActorPayload {
                     script: "start".to_string(),

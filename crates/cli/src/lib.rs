@@ -1,3 +1,3 @@
 pub mod cli;
 
-pub use cli::{Cli, Commands};
+pub use cli::{CacheCommands, Cli, Commands};
