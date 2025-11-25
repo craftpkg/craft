@@ -98,6 +98,16 @@ craft start   # Equivalent to: craft run start
 craft test    # Equivalent to: craft run test
 ```
 
+### Manage Cache
+
+Clean the global package cache:
+
+```bash
+craft cache clean --force
+```
+
+> **Note**: The `--force` flag is required for confirmation. Without it, the command will show a warning message.
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.

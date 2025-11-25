@@ -24,13 +24,13 @@ impl Actor<RunScriptActorPayload> for RunScriptActor {
 
     async fn run(&self) -> contract::Result<()> {
         debug::info!("Running script: {}", self.payload.script);
-
         let mut script = self.payload.script.clone();
         let package_json = PackageJson::from_file().await?;
-        if let Some(scripts) = package_json.scripts {
-            if let Some(package_script) = scripts.get(&script) {
-                script = package_script.clone();
-            }
+
+        if let Some(scripts) = package_json.scripts
+            && let Some(package_script) = scripts.get(&script)
+        {
+            script = package_script.clone();
         }
         let cwd = std::env::current_dir()?;
 
