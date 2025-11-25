@@ -2,12 +2,17 @@ use crate::{GitResolver, NpmResolver, ResolvedArtifact, download_artifact::Downl
 use contract::{Result, get_package_cache_dir};
 use network::Network;
 use package::InstallPackage;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Debug)]
 pub struct Resolver {
     npm_resolver: NpmResolver,
     git_resolver: GitResolver,
     network: Network,
+    // File-level locks to prevent concurrent downloads to the same file
+    download_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 impl Resolver {
@@ -16,6 +21,7 @@ impl Resolver {
             npm_resolver: NpmResolver::new(),
             git_resolver: GitResolver::new(),
             network: Network::new(),
+            download_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -45,7 +51,19 @@ impl Resolver {
         let filename = format!("{}-{}.tgz", artifact.name, artifact.version);
         let file_path = cache_dir.join(&filename);
 
-        // Check if file already exists
+        // Get or create a lock for this specific file
+        let file_lock = {
+            let mut locks = self.download_locks.lock().await;
+            locks
+                .entry(filename.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
+        };
+
+        // Acquire the file-specific lock
+        let _guard = file_lock.lock().await;
+
+        // Re-check if file exists after acquiring lock (another thread might have downloaded it)
         if file_path.exists() {
             debug::info!(
                 "Package {} already downloaded at: {:?}",
