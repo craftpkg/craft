@@ -1,4 +1,15 @@
 use indicatif::{ProgressBar, ProgressStyle};
+use tokio::sync::mpsc::UnboundedReceiver;
+
+#[derive(Debug)]
+pub enum ProgressMessage {
+    Inc(u64),
+    SetLength(u64),
+    SetMessage(String),
+    Println(String),
+    Finish(String),
+    Fail(String),
+}
 
 pub struct Progress {
     pb: ProgressBar,
@@ -10,7 +21,7 @@ impl Progress {
         pb.set_style(
             ProgressStyle::default_bar()
                 .template(
-                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
+                    "{spinner:.green} {msg} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
                 )
                 .expect("Invalid progress bar template")
                 .progress_chars("#>-"),
@@ -18,16 +29,23 @@ impl Progress {
         Self { pb }
     }
 
-    pub fn increment(&mut self, amount: u32) {
-        self.pb.inc(amount as u64);
-    }
-
-    pub fn success(&self) {
-        self.pb.finish_with_message("Success!");
-    }
-
-    pub fn fail(&self) {
-        self.pb.abandon_with_message("Fail!");
+    pub async fn run(self, mut rx: UnboundedReceiver<ProgressMessage>) {
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                ProgressMessage::Inc(n) => self.pb.inc(n),
+                ProgressMessage::SetLength(len) => self.pb.set_length(len),
+                ProgressMessage::SetMessage(msg) => self.pb.set_message(msg),
+                ProgressMessage::Println(msg) => self.pb.println(msg),
+                ProgressMessage::Finish(msg) => {
+                    self.pb.finish_with_message(msg);
+                    break;
+                }
+                ProgressMessage::Fail(msg) => {
+                    self.pb.abandon_with_message(msg);
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -44,11 +62,5 @@ mod tests {
     #[test]
     fn test_new() {
         let _progress = Progress::new();
-    }
-
-    #[test]
-    fn test_increment() {
-        let mut progress = Progress::new();
-        progress.increment(10);
     }
 }

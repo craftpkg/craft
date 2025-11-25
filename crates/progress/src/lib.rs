@@ -1,3 +1,3 @@
 pub mod progress;
 
-pub use progress::Progress;
+pub use progress::{Progress, ProgressMessage};
