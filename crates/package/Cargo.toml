@@ -7,6 +7,8 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+contract = { path = "../contract" }
 semver = "1.0.27"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+tokio = { version = "1", features = ["fs"] }

@@ -1,7 +1,6 @@
 use contract::{Actor, Pipeline, Result};
 use package::{InstallPackage, PackageJson};
 use pipeline::{InstallPipe, LinkerPipe};
-use tokio::fs;
 
 pub struct InstallActor;
 
@@ -11,16 +10,7 @@ impl Actor<()> for InstallActor {
     }
 
     async fn run(&self) -> Result<()> {
-        // Check if package.json exists
-        let package_json_path = std::env::current_dir()?.join("package.json");
-
-        if !package_json_path.exists() {
-            return Err(anyhow::anyhow!("no package.json found"));
-        }
-
-        // Read and parse package.json
-        let content = fs::read_to_string(&package_json_path).await?;
-        let package_json: PackageJson = serde_json::from_str(&content)?;
+        let package_json = PackageJson::from_file().await?;
 
         // Collect all dependencies
         let mut pkgs = Vec::new();

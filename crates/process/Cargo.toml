@@ -1,0 +1,15 @@
+[package]
+name = "process"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = [
+  "process",
+  "io-util",
+  "macros",
+  "rt",
+  "rt-multi-thread",
+] }
+anyhow = "1.0"
+contract = { path = "../contract" }

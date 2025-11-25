@@ -1,5 +1,7 @@
+use contract::{PackageError, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
+use tokio::fs;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +25,24 @@ pub struct PackageJson {
     pub dist: Option<PackageDist>,
     #[serde(flatten)]
     pub other: HashMap<String, serde_json::Value>,
+}
+
+impl PackageJson {
+    pub fn file_path() -> Result<PathBuf> {
+        let package_json_path = std::env::current_dir()?.join("package.json");
+        Ok(package_json_path)
+    }
+    pub async fn from_file() -> Result<Self> {
+        let package_json_path = Self::file_path()?;
+
+        if !package_json_path.exists() {
+            return Err(PackageError::NoPackageJson.into());
+        }
+
+        let content = fs::read_to_string(&package_json_path).await?;
+        let package_json: PackageJson = serde_json::from_str(&content)?;
+        Ok(package_json)
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

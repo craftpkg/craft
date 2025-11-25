@@ -12,6 +12,7 @@ members = [
   "crates/debug",
   "crates/network",
   "crates/tarball",
+  "crates/process",
 ]
 resolver = "2"
 

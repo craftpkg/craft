@@ -1,5 +1,6 @@
 use actor::{
     AddActorPayload, AddPackageActor, InstallActor, RemoveActorPayload, RemovePackageActor,
+    RunScriptActor, RunScriptActorPayload,
 };
 use cli::Commands;
 use contract::Actor;
@@ -40,16 +41,23 @@ impl CraftManager {
                 .await
             }
             Commands::Run { script } => {
-                println!("Running script: {}", script);
-                Ok(())
+                RunScriptActor::with(RunScriptActorPayload { script })
+                    .run()
+                    .await
             }
             Commands::Start => {
-                println!("Starting application...");
-                Ok(())
+                RunScriptActor::with(RunScriptActorPayload {
+                    script: "start".to_string(),
+                })
+                .run()
+                .await
             }
             Commands::Test => {
-                println!("Running tests...");
-                Ok(())
+                RunScriptActor::with(RunScriptActorPayload {
+                    script: "test".to_string(),
+                })
+                .run()
+                .await
             }
             Commands::Install => InstallActor::with(()).run().await,
         }

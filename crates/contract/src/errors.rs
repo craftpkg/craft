@@ -17,3 +17,9 @@ pub enum PipelineError {
     #[error("Download error: {message}")]
     DownloadError { message: String },
 }
+
+#[derive(Error, Debug)]
+pub enum PackageError {
+    #[error("no package.json found")]
+    NoPackageJson,
+}
