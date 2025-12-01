@@ -1043,6 +1043,7 @@ dependencies = [
  "package",
  "resolver",
  "tarball",
+ "tempfile",
  "tokio",
 ]
 

@@ -33,6 +33,8 @@ pub enum Commands {
     },
     Run {
         script: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     Cache {
         #[command(subcommand)]
@@ -41,6 +43,8 @@ pub enum Commands {
     Start,
     Test,
     Install,
+    #[command(external_subcommand)]
+    External(Vec<String>),
 }
 
 #[derive(Subcommand, Debug, PartialEq, Clone)]
@@ -72,8 +76,9 @@ impl Cli {
                 Commands::Remove { packages } => Commands::Remove {
                     packages: packages.clone(),
                 },
-                Commands::Run { script } => Commands::Run {
+                Commands::Run { script, args } => Commands::Run {
                     script: script.clone(),
+                    args: args.clone(),
                 },
                 Commands::Cache { command } => Commands::Cache {
                     command: command.clone(),
@@ -81,8 +86,19 @@ impl Cli {
                 Commands::Start => Commands::Start,
                 Commands::Test => Commands::Run {
                     script: "test".to_string(),
+                    args: vec![],
                 },
                 Commands::Install => Commands::Install,
+                Commands::External(args) => {
+                    if let Some(script) = args.first() {
+                        Commands::Run {
+                            script: script.clone(),
+                            args: args[1..].to_vec(),
+                        }
+                    } else {
+                        Commands::Install
+                    }
+                }
             },
             None => Commands::Install,
         }
@@ -132,8 +148,9 @@ mod tests {
     fn test_run_script() {
         let cli = Cli::parse_from(["craft", "run", "build"]);
         match cli.command {
-            Some(Commands::Run { script }) => {
+            Some(Commands::Run { script, args }) => {
                 assert_eq!(script, "build");
+                assert!(args.is_empty());
             }
             _ => panic!("Expected Run command"),
         }
@@ -147,8 +164,67 @@ mod tests {
         // Verify normalization
         let normalized = cli.normalize();
         match normalized {
-            Commands::Run { script } => assert_eq!(script, "test"),
-            _ => panic!("Expected normalized to Run {{ script: \"test\" }}"),
+            Commands::Run { script, args } => {
+                assert_eq!(script, "test");
+                assert!(args.is_empty());
+            }
+            _ => panic!("Expected normalized to Run {{ script: \"test\", args: [] }}"),
+        }
+    }
+
+    #[test]
+    fn test_default_to_install() {
+        // craft with no args should default to install
+        let cli = Cli::parse_from(["craft"]);
+        let normalized = cli.normalize();
+        assert_eq!(normalized, Commands::Install);
+    }
+
+    #[test]
+    fn test_external_subcommand() {
+        // craft tsc should be treated as external and normalized to Run
+        let cli = Cli::parse_from(["craft", "tsc"]);
+        match &cli.command {
+            Some(Commands::External(args)) => {
+                assert_eq!(args.len(), 1);
+                assert_eq!(args[0], "tsc");
+            }
+            _ => panic!("Expected External command"),
+        }
+
+        // Verify normalization
+        let normalized = cli.normalize();
+        match normalized {
+            Commands::Run { script, args } => {
+                assert_eq!(script, "tsc");
+                assert!(args.is_empty());
+            }
+            _ => panic!("Expected normalized to Run"),
+        }
+    }
+
+    #[test]
+    fn test_external_subcommand_with_args() {
+        // craft tsc --version should be treated as external with args
+        let cli = Cli::parse_from(["craft", "tsc", "--version", "--help"]);
+        match &cli.command {
+            Some(Commands::External(args)) => {
+                assert_eq!(args.len(), 3);
+                assert_eq!(args[0], "tsc");
+                assert_eq!(args[1], "--version");
+                assert_eq!(args[2], "--help");
+            }
+            _ => panic!("Expected External command"),
+        }
+
+        // Verify normalization
+        let normalized = cli.normalize();
+        match normalized {
+            Commands::Run { script, args } => {
+                assert_eq!(script, "tsc");
+                assert_eq!(args, vec!["--version", "--help"]);
+            }
+            _ => panic!("Expected normalized to Run"),
         }
     }
 

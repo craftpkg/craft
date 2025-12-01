@@ -40,8 +40,8 @@ impl CraftManager {
                 .run()
                 .await
             }
-            Commands::Run { script } => {
-                RunScriptActor::with(RunScriptActorPayload { script })
+            Commands::Run { script, args } => {
+                RunScriptActor::with(RunScriptActorPayload { script, args })
                     .run()
                     .await
             }
@@ -55,6 +55,7 @@ impl CraftManager {
             Commands::Start => {
                 RunScriptActor::with(RunScriptActorPayload {
                     script: "start".to_string(),
+                    args: vec![],
                 })
                 .run()
                 .await
@@ -62,11 +63,24 @@ impl CraftManager {
             Commands::Test => {
                 RunScriptActor::with(RunScriptActorPayload {
                     script: "test".to_string(),
+                    args: vec![],
                 })
                 .run()
                 .await
             }
             Commands::Install => InstallActor::with(()).run().await,
+            Commands::External(args) => {
+                if let Some(script) = args.first() {
+                    RunScriptActor::with(RunScriptActorPayload {
+                        script: script.clone(),
+                        args: args[1..].to_vec(),
+                    })
+                    .run()
+                    .await
+                } else {
+                    InstallActor::with(()).run().await
+                }
+            }
         }
     }
 }
