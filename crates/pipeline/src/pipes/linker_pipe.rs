@@ -205,59 +205,61 @@ impl LinkerPipe {
         artifact: &ResolvedArtifact,
         node_modules_dir: &std::path::Path,
     ) -> Result<()> {
-        if let Some(pkg_json) = &artifact.package {
-            if let Some(bin) = &pkg_json.bin {
-                let bin_dir = node_modules_dir.join(".bin");
-                fs::create_dir_all(&bin_dir).await?;
+        if artifact.package.is_none() {
+            return Ok(());
+        }
+        let pkg_json = artifact.package.as_ref().expect("package is not present");
+        if let Some(bin) = &pkg_json.bin {
+            let bin_dir = node_modules_dir.join(".bin");
+            fs::create_dir_all(&bin_dir).await?;
 
-                let bins = match bin {
-                    PackageBin::String(path) => {
-                        let mut map = HashMap::new();
-                        map.insert(artifact.name.clone(), path.clone());
-                        map
-                    }
-                    PackageBin::Map(map) => map.clone(),
-                };
-
-                for (bin_name, bin_path) in bins {
-                    let target_path = bin_dir.join(&bin_name);
-
-                    // The path to the script relative to the package root
-                    // We need to link to node_modules/<package_name>/<bin_path>
-                    // But since we are in node_modules/.bin, the relative path is ../<package_name>/<bin_path>
-
-                    let package_dir = node_modules_dir.join(&artifact.name);
-                    let source_path = package_dir.join(&bin_path);
-
-                    // Remove existing link if exists
-                    if target_path.exists() {
-                        if target_path.is_symlink() {
-                            fs::remove_file(&target_path).await?;
-                        } else {
-                            fs::remove_dir_all(&target_path).await?;
-                        }
-                    }
-
-                    #[cfg(unix)]
-                    {
-                        tokio::fs::symlink(&source_path, &target_path).await?;
-
-                        // Make executable
-                        use std::os::unix::fs::PermissionsExt;
-                        if let Ok(metadata) = fs::metadata(&source_path).await {
-                            let mut perms = metadata.permissions();
-                            perms.set_mode(0o755);
-                            let _ = fs::set_permissions(&source_path, perms).await;
-                        }
-                    }
-                    #[cfg(windows)]
-                    {
-                        // On Windows we might need a shim, but for now let's try symlink
-                        tokio::fs::symlink_file(&source_path, &target_path).await?;
-                    }
-
-                    debug::info!("Linked bin {} -> {:?}", bin_name, source_path);
+            let bins = match bin {
+                PackageBin::String(path) => {
+                    let mut map = HashMap::new();
+                    map.insert(artifact.name.clone(), path.clone());
+                    map
                 }
+                PackageBin::Map(map) => map.clone(),
+            };
+
+            for (bin_name, bin_path) in bins {
+                let target_path = bin_dir.join(&bin_name);
+
+                // The path to the script relative to the package root
+                // We need to link to node_modules/<package_name>/<bin_path>
+                // But since we are in node_modules/.bin, the relative path is ../<package_name>/<bin_path>
+
+                let package_dir = node_modules_dir.join(&artifact.name);
+                let source_path = package_dir.join(&bin_path);
+
+                // Remove existing link if exists
+                if target_path.exists() {
+                    if target_path.is_symlink() {
+                        fs::remove_file(&target_path).await?;
+                    } else {
+                        fs::remove_dir_all(&target_path).await?;
+                    }
+                }
+
+                #[cfg(unix)]
+                {
+                    tokio::fs::symlink(&source_path, &target_path).await?;
+
+                    // Make executable
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(metadata) = fs::metadata(&source_path).await {
+                        let mut perms = metadata.permissions();
+                        perms.set_mode(0o755);
+                        let _ = fs::set_permissions(&source_path, perms).await;
+                    }
+                }
+                #[cfg(windows)]
+                {
+                    // On Windows we might need a shim, but for now let's try symlink
+                    tokio::fs::symlink_file(&source_path, &target_path).await?;
+                }
+
+                debug::info!("Linked bin {} -> {:?}", bin_name, source_path);
             }
         }
         Ok(())

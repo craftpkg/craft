@@ -55,7 +55,7 @@ impl Actor<RunScriptActorPayload> for RunScriptActor {
         let mut command_with_args = script;
 
         if !self.payload.args.is_empty() {
-            command_with_args.push_str(" ");
+            command_with_args.push(' ');
             command_with_args.push_str(&self.payload.args.join(" "));
         }
 
