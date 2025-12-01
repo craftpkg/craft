@@ -10,6 +10,7 @@ members = [
   "crates/pipeline",
   "crates/contract",
   "crates/debug",
+  "crates/lockfile",
   "crates/network",
   "crates/tarball",
   "crates/process",
