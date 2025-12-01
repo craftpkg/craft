@@ -4,7 +4,7 @@ use std::sync::Arc;
 use contract::{Pipeline, Result, get_package_cache_dir};
 use futures::stream::{self, StreamExt};
 use node_semver::{Range, Version};
-use package::InstallPackage;
+use package::{InstallPackage, PackageBin};
 use resolver::ResolvedArtifact;
 use tokio::fs;
 
@@ -88,6 +88,10 @@ impl LinkerPipe {
                         tokio::fs::symlink(&dep_source_dir, &dep_dest_path).await?;
                         #[cfg(windows)]
                         tokio::fs::symlink_dir(&dep_source_dir, &dep_dest_path).await?;
+
+                        // Link binaries for this dependency
+                        self.link_package_binaries(dep_artifact, &artifact_node_modules)
+                            .await?;
                     }
                 }
             }
@@ -189,6 +193,73 @@ impl LinkerPipe {
 
         debug::info!("Linked root {} -> {:?}", artifact.name, source_dir);
 
+        // Link binaries for the root package
+        self.link_package_binaries(artifact, &node_modules).await?;
+
+        Ok(())
+    }
+
+    /// Helper to link binaries for a package into a node_modules directory
+    async fn link_package_binaries(
+        &self,
+        artifact: &ResolvedArtifact,
+        node_modules_dir: &std::path::Path,
+    ) -> Result<()> {
+        if let Some(pkg_json) = &artifact.package {
+            if let Some(bin) = &pkg_json.bin {
+                let bin_dir = node_modules_dir.join(".bin");
+                fs::create_dir_all(&bin_dir).await?;
+
+                let bins = match bin {
+                    PackageBin::String(path) => {
+                        let mut map = HashMap::new();
+                        map.insert(artifact.name.clone(), path.clone());
+                        map
+                    }
+                    PackageBin::Map(map) => map.clone(),
+                };
+
+                for (bin_name, bin_path) in bins {
+                    let target_path = bin_dir.join(&bin_name);
+
+                    // The path to the script relative to the package root
+                    // We need to link to node_modules/<package_name>/<bin_path>
+                    // But since we are in node_modules/.bin, the relative path is ../<package_name>/<bin_path>
+
+                    let package_dir = node_modules_dir.join(&artifact.name);
+                    let source_path = package_dir.join(&bin_path);
+
+                    // Remove existing link if exists
+                    if target_path.exists() {
+                        if target_path.is_symlink() {
+                            fs::remove_file(&target_path).await?;
+                        } else {
+                            fs::remove_dir_all(&target_path).await?;
+                        }
+                    }
+
+                    #[cfg(unix)]
+                    {
+                        tokio::fs::symlink(&source_path, &target_path).await?;
+
+                        // Make executable
+                        use std::os::unix::fs::PermissionsExt;
+                        if let Ok(metadata) = fs::metadata(&source_path).await {
+                            let mut perms = metadata.permissions();
+                            perms.set_mode(0o755);
+                            let _ = fs::set_permissions(&source_path, perms).await;
+                        }
+                    }
+                    #[cfg(windows)]
+                    {
+                        // On Windows we might need a shim, but for now let's try symlink
+                        tokio::fs::symlink_file(&source_path, &target_path).await?;
+                    }
+
+                    debug::info!("Linked bin {} -> {:?}", bin_name, source_path);
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -239,6 +310,97 @@ impl Pipeline<()> for LinkerPipe {
 
         for result in linking_results {
             result?;
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn test_link_binaries() -> Result<()> {
+        let temp_home = tempdir()?;
+        let temp_cwd = tempdir()?;
+
+        // Mock HOME
+        unsafe {
+            env::set_var("HOME", temp_home.path());
+        }
+        env::set_current_dir(&temp_cwd)?;
+
+        // Setup cache
+        let cache_dir = temp_home.path().join(".craft").join("packages");
+        let pkg_name = "test-pkg";
+        let pkg_version = "1.0.0";
+        let pkg_dir = cache_dir.join(format!("{}-{}/package", pkg_name, pkg_version));
+        fs::create_dir_all(&pkg_dir).await?;
+
+        // Create bin script
+        let bin_script_path = pkg_dir.join("cli.js");
+        {
+            let mut file = File::create(&bin_script_path)?;
+            writeln!(file, "#!/usr/bin/env node")?;
+            writeln!(file, "console.log('hello');")?;
+        }
+
+        // Create artifact
+        let pkg_json = package::PackageJson {
+            name: Some(pkg_name.to_string()),
+            version: Some(pkg_version.to_string()),
+            description: None,
+            scripts: None,
+            keywords: None,
+            dependencies: None,
+            dev_dependencies: None,
+            dist: None,
+            bin: Some(package::PackageBin::String("cli.js".to_string())),
+            other: HashMap::new(),
+        };
+
+        let artifact = ResolvedArtifact {
+            name: pkg_name.to_string(),
+            version: pkg_version.to_string(),
+            download_url: "http://example.com".to_string(),
+            package: Some(pkg_json),
+        };
+
+        let root_pkg =
+            InstallPackage::new(pkg_name.to_string(), Some(pkg_version.to_string()), false);
+
+        let pipe = LinkerPipe::new(vec![artifact], vec![root_pkg]);
+        pipe.run().await?;
+
+        // Verify
+        let bin_link = temp_cwd
+            .path()
+            .join("node_modules")
+            .join(".bin")
+            .join(pkg_name);
+        assert!(bin_link.exists());
+        assert!(bin_link.is_symlink());
+
+        let target = tokio::fs::read_link(&bin_link).await?;
+        let expected_target = temp_cwd
+            .path()
+            .join("node_modules")
+            .join(pkg_name)
+            .join("cli.js");
+
+        // Handle /var vs /private/var on macOS
+        let target_str = target.to_string_lossy();
+        let expected_str = expected_target.to_string_lossy();
+
+        if target_str.starts_with("/private/var") && expected_str.starts_with("/var") {
+            assert_eq!(target_str, format!("/private{}", expected_str));
+        } else {
+            assert_eq!(target, expected_target);
         }
 
         Ok(())

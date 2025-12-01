@@ -1,4 +1,4 @@
-use crate::ResolvedArtifact;
+use crate::{DependencySpec, ResolvedArtifact};
 use anyhow::Result;
 use network::Network;
 use node_semver::{Range, Version};
@@ -17,7 +17,10 @@ impl NpmResolver {
     }
 
     pub async fn resolve(&self, package: &InstallPackage) -> Result<ResolvedArtifact> {
-        let url = format!("https://registry.npmjs.org/{}", package.name);
+        // Convert to DependencySpec (handles npm aliases and regular versions)
+        let dep_spec: DependencySpec = package.into();
+
+        let url = format!("https://registry.npmjs.org/{}", dep_spec.package_name);
         let npm_package = match self.client.fetch::<NpmPackage>(&url).await {
             Ok(package) => package,
             Err(e) => {
@@ -26,7 +29,7 @@ impl NpmResolver {
             }
         };
 
-        let version = if let Some(ref req_version) = package.version {
+        let version = if let Some(ref req_version) = dep_spec.version {
             // Find a version that satisfies the requirement
             npm_package
                 .versions
@@ -47,8 +50,9 @@ impl NpmResolver {
             npm_package.dist_tags.get("latest").cloned()
         };
 
-        let version = version
-            .ok_or_else(|| anyhow::anyhow!("Version not found for package {}", package.name))?;
+        let version = version.ok_or_else(|| {
+            anyhow::anyhow!("Version not found for package {}", dep_spec.package_name)
+        })?;
 
         let pkg_json = npm_package
             .versions
@@ -130,5 +134,21 @@ mod tests {
         let resolver = NpmResolver::new();
         let result = resolver.resolve(&pkg).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_npm_alias() {
+        // Test npm:package@version format (e.g., "wrap-ansi-cjs": "npm:wrap-ansi@^7.0.0")
+        let pkg = InstallPackage::new(
+            "wrap-ansi-cjs".to_string(),
+            Some("npm:wrap-ansi@^7.0.0".to_string()),
+            false,
+        );
+        let resolver = NpmResolver::new();
+        let result = resolver.resolve(&pkg).await;
+        assert!(result.is_ok());
+        let artifact = result.expect("Failed to resolve npm alias");
+        assert_eq!(artifact.name, "wrap-ansi");
+        assert!(artifact.version.starts_with("7."));
     }
 }

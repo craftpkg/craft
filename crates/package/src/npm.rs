@@ -23,8 +23,17 @@ pub struct PackageJson {
     pub dev_dependencies: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dist: Option<PackageDist>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bin: Option<PackageBin>,
     #[serde(flatten)]
     pub other: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(untagged)]
+pub enum PackageBin {
+    String(String),
+    Map(HashMap<String, String>),
 }
 
 impl PackageJson {
