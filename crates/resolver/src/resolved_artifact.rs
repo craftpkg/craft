@@ -7,6 +7,7 @@ pub struct ResolvedArtifact {
     pub name: String,
     pub version: String,
     pub download_url: String,
+    pub integrity: Option<String>,
     pub package: Option<PackageJson>,
 }
 

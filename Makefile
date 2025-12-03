@@ -6,7 +6,7 @@ build:
 	cargo build
 
 test:
-	cargo test
+	cargo test -- --test-threads=1
 
 lint:
 	cargo clippy --workspace -- -D warnings

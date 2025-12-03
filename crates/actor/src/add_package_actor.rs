@@ -1,6 +1,6 @@
 use contract::{Actor, Pipeline};
 use package::{InstallPackage, PackageJson};
-use pipeline::{InstallPipe, LinkerPipe};
+use pipeline::{InstallPipe, LinkerPipe, LockfileGeneratorPipe};
 
 #[derive(Debug)]
 pub struct AddActorPayload {
@@ -32,7 +32,12 @@ impl Actor<AddActorPayload> for AddPackageActor {
 
         let artifacts = InstallPipe::new(pkgs.clone()).run().await?;
 
-        LinkerPipe::new(artifacts.clone(), pkgs).run().await?;
+        let linker_pipe = LinkerPipe::new(artifacts.clone(), pkgs);
+        let lockfile_pipe = LockfileGeneratorPipe::new(artifacts.clone());
+
+        let (linker_res, lockfile_res) = tokio::join!(linker_pipe.run(), lockfile_pipe.run());
+        linker_res?;
+        lockfile_res?;
 
         let mut package_json = PackageJson::from_file().await?;
 

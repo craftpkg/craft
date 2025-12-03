@@ -370,6 +370,7 @@ mod tests {
             name: pkg_name.to_string(),
             version: pkg_version.to_string(),
             download_url: "http://example.com".to_string(),
+            integrity: Some("sha512-test".to_string()),
             package: Some(pkg_json),
         };
 

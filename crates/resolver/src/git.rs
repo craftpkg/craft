@@ -19,6 +19,7 @@ impl GitResolver {
         Ok(ResolvedArtifact {
             name: name.to_string(),
             version: "git".to_string(),
+            integrity: None,
             download_url: download_url.to_string(),
             package: None,
         })

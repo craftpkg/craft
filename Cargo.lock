@@ -1059,6 +1059,7 @@ dependencies = [
  "contract",
  "debug",
  "futures",
+ "lockfile",
  "node-semver",
  "package",
  "resolver",

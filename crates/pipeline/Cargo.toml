@@ -12,6 +12,7 @@ package = { path = "../package" }
 resolver = { path = "../resolver" }
 debug = { path = "../debug" }
 tarball = { path = "../tarball" }
+lockfile = { path = "../lockfile" }
 futures = "0.3"
 tokio = { version = "1.48.0", features = ["full"] }
 async-recursion = "1.0"

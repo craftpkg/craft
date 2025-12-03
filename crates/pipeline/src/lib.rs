@@ -1,3 +1,3 @@
 pub mod pipes;
 
-pub use pipes::{InstallPipe, LinkerPipe};
+pub use pipes::{InstallPipe, LinkerPipe, LockfileGeneratorPipe};
