@@ -1,8 +1,10 @@
 use crate::{DependencySpec, ResolvedArtifact};
-use anyhow::Result;
+use contract::PipelineError;
+use contract::Result;
 use network::Network;
 use node_semver::{Range, Version};
 use package::{InstallPackage, NpmPackage};
+use tokio::time;
 
 #[derive(Debug)]
 pub struct NpmResolver {
@@ -16,7 +18,7 @@ impl NpmResolver {
         }
     }
 
-    pub async fn resolve(&self, package: &InstallPackage) -> Result<ResolvedArtifact> {
+    async fn _resolve(&self, package: &InstallPackage) -> Result<ResolvedArtifact> {
         // Convert to DependencySpec (handles npm aliases and regular versions)
         let dep_spec: DependencySpec = package.into();
 
@@ -25,7 +27,10 @@ impl NpmResolver {
             Ok(package) => package,
             Err(e) => {
                 debug::error!("Failed to fetch npm package: {} {}", url, e);
-                return Err(e);
+                return Err(PipelineError::NetworkError {
+                    message: e.to_string(),
+                }
+                .into());
             }
         };
 
@@ -74,6 +79,7 @@ impl NpmResolver {
                 .clone()
                 .expect("Resolved package should have version property"),
             download_url: dist.tarball.clone(),
+            integrity: dist.integrity.clone(),
             package: Some(pkg_json.clone()),
         };
 
@@ -84,6 +90,29 @@ impl NpmResolver {
         );
 
         Ok(resolved)
+    }
+
+    pub async fn resolve(&self, package: &InstallPackage) -> Result<ResolvedArtifact> {
+        let mut retry_count = 0;
+        let max_retries = 3;
+
+        loop {
+            match self._resolve(package).await {
+                Ok(resolved) => return Ok(resolved),
+                Err(e) => {
+                    retry_count += 1;
+                    if retry_count > max_retries {
+                        return Err(e);
+                    }
+                    debug::warning!(
+                        "Failed to resolve package {} {}",
+                        package.name,
+                        package.version.clone().unwrap_or("".to_string())
+                    );
+                    time::sleep(time::Duration::from_secs(1)).await;
+                }
+            }
+        }
     }
 }
 

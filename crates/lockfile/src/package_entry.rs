@@ -7,9 +7,7 @@ pub struct PackageEntry {
     pub name: String,
     pub version: String,
     pub resolved: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub integrity: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub dependencies: Option<HashMap<String, String>>,
 }
 
