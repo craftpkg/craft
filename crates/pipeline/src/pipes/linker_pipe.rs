@@ -47,7 +47,7 @@ impl LinkerPipe {
             ArtifactSource::Directory { path } => {
                 fsutil::replace_with_copy(path, &dest, &COPY_EXCLUDED).await
             }
-            _ => fsutil::import_dir(&node.artifact.package_dir(&self.context), &dest).await,
+            _ => fsutil::import_dir(&node.artifact.package_dir(&self.context), &dest, true).await,
         };
         imported.with_context(|| format!("failed to import {node_id} into node_modules"))
     }
