@@ -161,7 +161,6 @@ fn fails_before_installing_without_package_json() {
 }
 
 #[test]
-#[ignore = "fixed by 1.10: package.json is re-serialized with new key order and formatting"]
 fn add_then_remove_leaves_package_json_unchanged() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("ms", "2.1.3"));
