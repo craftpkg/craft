@@ -1,4 +1,4 @@
-use contract::{Actor, Result};
+use contract::{Actor, Context, Result};
 use package::PackageJson;
 use process::Process;
 
@@ -15,13 +15,14 @@ impl std::fmt::Display for RunScriptActorPayload {
 }
 
 pub struct RunScriptActor {
+    context: Context,
     payload: RunScriptActorPayload,
 }
 
 impl RunScriptActor {
     async fn lookup_script(&self) -> Result<String> {
         let mut script = self.payload.script.clone();
-        let package_json = PackageJson::from_file().await?;
+        let package_json = PackageJson::from_file(&self.context.package_json_path()).await?;
 
         if let Some(scripts) = package_json.scripts
             && let Some(package_script) = scripts.get(&script)
@@ -29,8 +30,7 @@ impl RunScriptActor {
             script = package_script.clone();
         } else {
             // Check if it exists in node_modules/.bin
-            let cwd = std::env::current_dir()?;
-            let bin_path = cwd.join("node_modules").join(".bin").join(&script);
+            let bin_path = self.context.node_modules_dir().join(".bin").join(&script);
 
             if bin_path.exists() {
                 script = bin_path.to_string_lossy().to_string();
@@ -42,15 +42,13 @@ impl RunScriptActor {
 }
 
 impl Actor<RunScriptActorPayload> for RunScriptActor {
-    fn with(payload: RunScriptActorPayload) -> Self {
-        Self { payload }
+    fn with(context: Context, payload: RunScriptActorPayload) -> Self {
+        Self { context, payload }
     }
 
     async fn run(&self) -> contract::Result<()> {
         debug::info!("Running script: {}", self.payload.script);
         let script = self.lookup_script().await?;
-
-        let cwd = std::env::current_dir()?;
 
         let mut command_with_args = script;
 
@@ -59,7 +57,11 @@ impl Actor<RunScriptActorPayload> for RunScriptActor {
             command_with_args.push_str(&self.payload.args.join(" "));
         }
 
-        Process::run_script(&command_with_args, Some(cwd.to_str().unwrap_or("."))).await?;
+        Process::run_script(
+            &command_with_args,
+            Some(self.context.cwd.to_str().unwrap_or(".")),
+        )
+        .await?;
 
         debug::info!("Script completed successfully");
         Ok(())
@@ -87,7 +89,8 @@ mod tests {
             args: vec!["test".to_string()],
         };
 
-        let actor = RunScriptActor::with(payload);
+        let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false);
+        let actor = RunScriptActor::with(context, payload);
         assert_eq!(actor.payload.script, "craft");
         assert_eq!(actor.payload.args, vec!["test"]);
     }
