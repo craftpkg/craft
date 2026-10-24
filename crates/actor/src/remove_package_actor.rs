@@ -2,10 +2,11 @@ use std::path::Path;
 
 use contract::{Actor, Context, Result};
 use lockfile::Lockfile;
-use package::{DependencySection, ProjectManifest};
+use package::{DependencySection, PackageJson, ProjectManifest};
 use pipeline::prune_node_modules;
 
 use crate::lock_state::mark_installed;
+use crate::scripts::script_policy;
 use tokio::fs;
 
 #[derive(Debug)]
@@ -80,7 +81,13 @@ impl RemovePackageActor {
             lockfile.remove_dependency(package_name);
         }
         lockfile.save(&self.context.cwd).await?;
-        mark_installed(&self.context, &lockfile).await
+        let package_json = PackageJson::from_file(&self.context.package_json_path()).await?;
+        mark_installed(
+            &self.context,
+            &lockfile,
+            &script_policy(&package_json, false),
+        )
+        .await
     }
 }
 
