@@ -6,6 +6,7 @@ mod install;
 mod layout;
 mod lockfile;
 mod peers;
+mod platforms;
 mod prune;
 mod remove;
 mod run;
