@@ -3,7 +3,7 @@ use predicates::str::contains;
 use serde_json::{Value, json};
 use testkit::{MockRegistry, PackageFixture};
 
-use crate::common::Project;
+use crate::common::{Project, append_script, create_file_script};
 
 /// A package whose `postinstall` records that it ran, from inside the package directory.
 fn native(name: &str, postinstall: &str) -> PackageFixture {
@@ -191,7 +191,7 @@ fn ignore_scripts_runs_nothing() {
     let registry = MockRegistry::start();
     registry.publish(native("native", WRITE_BUILT));
     let mut package_json = with_trusted(json!({ "native": "^1.0.0" }), &["native"]);
-    package_json["scripts"] = json!({ "postinstall": "touch project-built.txt" });
+    package_json["scripts"] = json!({ "postinstall": create_file_script("project-built.txt") });
     let project = Project::new(&registry, package_json);
 
     project
@@ -214,9 +214,9 @@ fn runs_the_projects_own_lifecycle_scripts_in_order() {
         json!({
             "dependencies": { "ms": "^2.0.0" },
             "scripts": {
-                "preinstall": "echo preinstall >> lifecycle.txt",
-                "postinstall": "echo postinstall >> lifecycle.txt",
-                "prepare": "echo prepare >> lifecycle.txt",
+                "preinstall": append_script("lifecycle.txt", "preinstall"),
+                "postinstall": append_script("lifecycle.txt", "postinstall"),
+                "prepare": append_script("lifecycle.txt", "prepare"),
             },
         }),
     );
@@ -234,7 +234,7 @@ fn craft_ci_with_ignore_scripts_runs_nothing() {
     let registry = MockRegistry::start();
     registry.publish(native("native", WRITE_BUILT));
     let mut package_json = with_trusted(json!({ "native": "^1.0.0" }), &["native"]);
-    package_json["scripts"] = json!({ "postinstall": "touch project-built.txt" });
+    package_json["scripts"] = json!({ "postinstall": create_file_script("project-built.txt") });
     let project = Project::new(&registry, package_json);
     project
         .craft()
