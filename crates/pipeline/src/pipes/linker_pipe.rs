@@ -23,7 +23,7 @@ impl LinkerPipe {
     }
 
     fn package_dir(&self, artifact: &ResolvedArtifact) -> PathBuf {
-        self.context.package_dir(&artifact.name, &artifact.version)
+        artifact.package_dir(&self.context)
     }
 
     /// Links a package's dependencies into its own node_modules in the cache.
@@ -170,9 +170,7 @@ mod tests {
         let pkg_json = package::PackageJson {
             name: Some(pkg_name.to_string()),
             version: Some(pkg_version.to_string()),
-            description: None,
             scripts: None,
-            keywords: None,
             dependencies: None,
             dev_dependencies: None,
             dist: None,
@@ -183,7 +181,9 @@ mod tests {
         let artifact = ResolvedArtifact {
             name: pkg_name.to_string(),
             version: pkg_version.to_string(),
-            download_url: "http://example.com".to_string(),
+            source: resolver::ArtifactSource::Registry {
+                tarball_url: "http://example.com".to_string(),
+            },
             integrity: None,
             package: Some(pkg_json),
         };
