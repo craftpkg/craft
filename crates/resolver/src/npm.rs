@@ -7,12 +7,14 @@ use package::{InstallPackage, NpmPackage};
 #[derive(Debug)]
 pub struct NpmResolver {
     client: Network,
+    registry: String,
 }
 
 impl NpmResolver {
-    pub fn new() -> Self {
+    pub fn new(registry: String) -> Self {
         Self {
             client: Network::new(),
+            registry,
         }
     }
 
@@ -20,7 +22,7 @@ impl NpmResolver {
         // Convert to DependencySpec (handles npm aliases and regular versions)
         let dep_spec: DependencySpec = package.into();
 
-        let url = format!("https://registry.npmjs.org/{}", dep_spec.package_name);
+        let url = format!("{}/{}", self.registry, dep_spec.package_name);
         let npm_package = match self.client.fetch::<NpmPackage>(&url).await {
             Ok(package) => package,
             Err(e) => {
@@ -87,21 +89,16 @@ impl NpmResolver {
     }
 }
 
-impl Default for NpmResolver {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use contract::DEFAULT_REGISTRY;
 
     #[tokio::test]
     #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_react_latest() {
         let pkg = InstallPackage::new("react".to_string(), None, false);
-        let resolver = NpmResolver::new();
+        let resolver = NpmResolver::new(DEFAULT_REGISTRY.to_string());
         let result = resolver.resolve(&pkg).await;
         assert!(result.is_ok());
         let artifact = result.expect("Failed to resolve react package");
@@ -118,7 +115,7 @@ mod tests {
     #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_react_specific_version() {
         let pkg = InstallPackage::new("react".to_string(), Some("17.0.2".to_string()), false);
-        let resolver = NpmResolver::new();
+        let resolver = NpmResolver::new(DEFAULT_REGISTRY.to_string());
         let result = resolver.resolve(&pkg).await;
         assert!(result.is_ok());
         let artifact = result.expect("Failed to resolve react 17.0.2");
@@ -134,7 +131,7 @@ mod tests {
     #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_invalid_package() {
         let pkg = InstallPackage::new("invalid-package-name-12345".to_string(), None, false);
-        let resolver = NpmResolver::new();
+        let resolver = NpmResolver::new(DEFAULT_REGISTRY.to_string());
         let result = resolver.resolve(&pkg).await;
         assert!(result.is_err());
     }
@@ -148,7 +145,7 @@ mod tests {
             Some("npm:wrap-ansi@^7.0.0".to_string()),
             false,
         );
-        let resolver = NpmResolver::new();
+        let resolver = NpmResolver::new(DEFAULT_REGISTRY.to_string());
         let result = resolver.resolve(&pkg).await;
         assert!(result.is_ok());
         let artifact = result.expect("Failed to resolve npm alias");
