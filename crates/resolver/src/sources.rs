@@ -6,7 +6,8 @@ use network::{Integrity, Network};
 use package::PackageJson;
 use tarball::gzip::unzip;
 
-use crate::resolved_artifact::source_hash;
+use crate::git::{GitSpec, checkout, resolve_commit};
+use crate::resolved_artifact::{git_package_dir, source_hash};
 use crate::{ArtifactSource, ResolvedArtifact};
 
 const COPY_EXCLUDED: [&str; 2] = ["node_modules", ".git"];
@@ -106,6 +107,40 @@ pub(crate) async fn resolve_remote_tarball(
     .await
 }
 
+/// A git dependency, pinned to the commit its committish names. Hosted repositories are
+/// downloaded as the host's tarball of that commit; others, or hosted ones the tarball can't be
+/// fetched for (private repositories), are checked out with git.
+pub(crate) async fn resolve_git(
+    context: &Context,
+    network: &Network,
+    requested_name: Option<&str>,
+    spec: &str,
+) -> Result<ResolvedArtifact> {
+    let git_spec = GitSpec::parse(spec).ok_or_else(|| anyhow!("invalid git dependency: {spec}"))?;
+    let sha = resolve_commit(&git_spec).await?;
+    let package_dir = git_package_dir(context, &git_spec.clone_url, &sha);
+
+    if !package_dir.exists() {
+        let downloaded = match &git_spec.hosted {
+            Some(hosted) => {
+                download_tarball(context, network, &hosted.tarball_url(&sha), &package_dir).await
+            }
+            None => Err(anyhow!("{} is not a hosted repository", git_spec.clone_url)),
+        };
+        if let Err(error) = downloaded {
+            debug::info!("Checking out {} with git: {error:#}", git_spec.clone_url);
+            check_out_into(context, &git_spec.clone_url, &sha, &package_dir).await?;
+        }
+    }
+
+    let manifest = read_manifest(&package_dir).await?;
+    let source = ArtifactSource::Git {
+        url: git_spec.clone_url,
+        sha,
+    };
+    artifact_from(manifest, requested_name, source, None)
+}
+
 /// Where a `file:` or `link:` path points: relative paths are taken from `base_dir`, `~/` from
 /// the user's home directory.
 pub(crate) fn resolve_path(base_dir: &Path, path: &str) -> PathBuf {
@@ -115,6 +150,39 @@ pub(crate) fn resolve_path(base_dir: &Path, path: &str) -> PathBuf {
         _ => base_dir.join(path),
     };
     fsutil::normalize_lexically(&joined)
+}
+
+async fn download_tarball(
+    context: &Context,
+    network: &Network,
+    url: &str,
+    package_dir: &Path,
+) -> Result<()> {
+    let tarball_path = context
+        .package_cache_dir()
+        .join(format!("git-{}.tgz", source_hash(url)));
+    tokio::fs::create_dir_all(context.package_cache_dir()).await?;
+    network.download(url, tarball_path.clone(), None).await?;
+    let extracted = unzip(tarball_path.clone(), package_dir.to_path_buf()).await;
+    let _ = tokio::fs::remove_file(&tarball_path).await;
+    extracted
+}
+
+async fn check_out_into(
+    context: &Context,
+    clone_url: &str,
+    sha: &str,
+    package_dir: &Path,
+) -> Result<()> {
+    let cache_dir = context.package_cache_dir();
+    tokio::fs::create_dir_all(&cache_dir).await?;
+    let checkout_dir = tempfile::Builder::new()
+        .prefix(".git-checkout-")
+        .tempdir_in(&cache_dir)?;
+
+    checkout(clone_url, sha, checkout_dir.path()).await?;
+    fsutil::replace_with_copy(checkout_dir.path(), package_dir, &COPY_EXCLUDED).await?;
+    Ok(())
 }
 
 async fn extract(
@@ -176,6 +244,7 @@ fn describe(source: &ArtifactSource) -> String {
         ArtifactSource::LocalTarball { path }
         | ArtifactSource::Directory { path }
         | ArtifactSource::Link { path } => path.display().to_string(),
+        ArtifactSource::Git { url, sha } => format!("{url}#{sha}"),
     }
 }
 
