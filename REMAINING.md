@@ -30,7 +30,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 |---|---|---|---|
 | **Phase 0 — Foundations** | | | |
 | 0.1 | Explicit `Context` (cwd + `CRAFT_HOME`) instead of process-global env/cwd | P2 | [x] |
-| 0.2 | Test isolation: no real installs or env mutation in unit tests | P2 | [ ] |
+| 0.2 | Test isolation: no real installs or env mutation in unit tests | P2 | [x] |
 | 0.3 | Mock registry + end-to-end test harness | P2 | [ ] |
 | 0.4 | Lint/CI hygiene (`clippy --all-targets`, fmt, workspace lints, dead code) | P2 | [ ] |
 | **Phase 1 — Correctness fixes (current layout)** | | | |
@@ -105,14 +105,14 @@ Do these first: every later fix needs a fast, offline, isolated way to prove it 
 - `grep -rn "current_dir()\|set_var\|get_package_cache_dir" crates/` only hits `main` and `Context::from_env`.
 - Tests construct a `Context` pointing at a `tempdir` — no global mutation.
 
-### 0.2 Test isolation · P2 ✅
+### 0.2 Test isolation · P2 ✅ — ✔ done
+
+> Done: manager tests rewritten as offline dispatch tests (start/run scripts, install without package.json, remove, cache clean) in a tempdir `Context`; 6 live-registry resolver tests are `#[ignore]`d and run in a separate `registry-tests` CI job via `--ignored`. Verified: `cargo test` passes with all HTTP(S) routed to a dead proxy, and leaves `git status` and `~/.craft` untouched. The ignored tests get offline equivalents once the mock registry (0.3) exists.
 
 **Problem**
 - `crates/manager/src/manager.rs:99-115` runs a real `craft add react` against the crate dir — every `cargo test` creates `crates/manager/node_modules` and writes to the real `~/.craft`.
 - `test_handle_start_command` tries to run a real `start` script.
 - Resolver tests (`npm.rs`, `resolver.rs`) require network access and the live registry state.
-
-> Partly addressed by 0.1: manager tests now run in a tempdir `Context`, so they no longer write to the repo or `~/.craft` — but they still hit the network.
 
 **Fix**
 - Replace manager tests with dispatch tests that don't execute actors (or run them against a `Context` in a tempdir + mock registry from 0.3).
