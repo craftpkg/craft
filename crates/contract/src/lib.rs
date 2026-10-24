@@ -16,4 +16,4 @@ pub use errors::{
 };
 pub use npmrc::{Credentials, RegistryConfig};
 pub use pipeline::Pipeline;
-pub use platform::{HostPlatform, node_cpu, node_os};
+pub use platform::{HostPlatform, node_cpu, node_os, user_agent};
