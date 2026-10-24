@@ -5,5 +5,5 @@ pub mod project_manifest;
 
 pub use dependency_spec::{DependencySpec, VersionRequirement};
 pub use install_package::InstallPackage;
-pub use npm::{NpmPackage, PackageBin, PackageJson};
+pub use npm::{NpmPackage, PackageBin, PackageJson, PeerSpec};
 pub use project_manifest::{DependencySection, ProjectManifest};
