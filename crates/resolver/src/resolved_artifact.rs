@@ -34,7 +34,7 @@ pub enum ArtifactSource {
     LocalTarball {
         path: PathBuf,
     },
-    /// A `file:` directory, copied into the store on every install.
+    /// A `file:` directory, copied from its source into the project on every install.
     Directory {
         path: PathBuf,
     },
@@ -72,7 +72,8 @@ impl ResolvedArtifact {
         }
     }
 
-    /// The directory holding the package's files: its store entry, or the target of a link.
+    /// The directory holding the package's files: its store entry, or the local directory for
+    /// `file:` and `link:` dependencies.
     /// Registry entries are named `<name>@<version>-<hash>` so the store stays readable, with
     /// the hash of the integrity keeping same-named versions from different registries apart.
     pub fn package_dir(&self, context: &Context) -> PathBuf {
@@ -86,19 +87,16 @@ impl ResolvedArtifact {
                 context.store_dir().join(format!(
                     "{escaped_name}@{}-{}",
                     self.version,
-                    source_hash(&key)
+                    short_hash(&key)
                 ))
             }
-            ArtifactSource::Link { path } => path.clone(),
+            ArtifactSource::Link { path } | ArtifactSource::Directory { path } => path.clone(),
             ArtifactSource::Tarball { .. } | ArtifactSource::LocalTarball { .. } => {
                 let key = self
                     .integrity
                     .as_ref()
                     .map_or_else(|| self.node_id().to_string(), Integrity::to_string);
                 store_entry(context, "tarball", &key)
-            }
-            ArtifactSource::Directory { path } => {
-                store_entry(context, "file", &path.display().to_string())
             }
             ArtifactSource::Git { url, sha } => git_package_dir(context, url, sha),
         }
@@ -111,7 +109,8 @@ impl Display for ResolvedArtifact {
     }
 }
 
-pub(crate) fn source_hash(key: &str) -> String {
+/// A short, stable hash of `key` for directory names in the store and virtual store.
+pub fn short_hash(key: &str) -> String {
     let digest = Sha256::digest(key.as_bytes());
     let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
     hex[..SOURCE_HASH_LENGTH].to_string()
@@ -125,7 +124,7 @@ pub(crate) fn git_package_dir(context: &Context, url: &str, sha: &str) -> PathBu
 pub(crate) fn store_entry(context: &Context, kind: &str, key: &str) -> PathBuf {
     context
         .store_dir()
-        .join(format!("{kind}-{}", source_hash(key)))
+        .join(format!("{kind}-{}", short_hash(key)))
 }
 
 #[cfg(test)]
@@ -183,19 +182,14 @@ mod tests {
             link.package_dir(&context),
             PathBuf::from("/app/libs/local-lib")
         );
-        let directory_dir = directory.package_dir(&context);
         assert_eq!(
-            directory_dir.parent().unwrap(),
-            Path::new("/home/me/.craft/store/v1")
+            directory.package_dir(&context),
+            PathBuf::from("/app/libs/local-lib")
         );
-        assert!(
-            directory_dir
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with("file-")
+        assert_ne!(
+            directory.package_dir(&context),
+            other_directory.package_dir(&context)
         );
-        assert_ne!(directory_dir, other_directory.package_dir(&context));
 
         let registry = ResolvedArtifact {
             name: "@types/node".to_string(),
