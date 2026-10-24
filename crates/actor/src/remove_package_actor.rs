@@ -8,7 +8,6 @@ use pipeline::prune_node_modules;
 use crate::lock_state::{InstallMode, mark_installed};
 use crate::scripts::script_policy;
 use crate::summary::report_changes;
-use tokio::fs;
 
 #[derive(Debug)]
 pub struct RemoveActorPayload {
@@ -97,26 +96,20 @@ impl RemovePackageActor {
     }
 }
 
-/// Removes the `.bin` links that point into the package, returning their names.
+/// Removes the `.bin` entries that run something inside the package, returning their names.
 async fn remove_bins(node_modules: &Path, package_name: &str) -> Result<Vec<String>> {
     let bin_dir = node_modules.join(".bin");
     let package_dir = node_modules.join(package_name);
-    let mut entries = match fs::read_dir(&bin_dir).await {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error.into()),
-    };
 
     let mut removed = Vec::new();
-    while let Some(entry) = entries.next_entry().await? {
-        let Ok(target) = fs::read_link(entry.path()).await else {
-            continue;
-        };
-        let is_package_bin =
-            fsutil::normalize_lexically(&bin_dir.join(target)).starts_with(&package_dir);
+    for name in fsutil::bin_names(&bin_dir).await? {
+        let link = bin_dir.join(&name);
+        let is_package_bin = fsutil::bin_target(&link)
+            .await
+            .is_some_and(|target| target.starts_with(&package_dir));
         if is_package_bin {
-            fsutil::remove_entry(&entry.path()).await?;
-            removed.push(entry.file_name().to_string_lossy().into_owned());
+            fsutil::remove_bin(&link).await?;
+            removed.push(name);
         }
     }
     Ok(removed)
@@ -125,6 +118,7 @@ async fn remove_bins(node_modules: &Path, package_name: &str) -> Result<Vec<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::fs;
 
     #[tokio::test]
     async fn test_remove_package_actor_removes_from_node_modules() {
