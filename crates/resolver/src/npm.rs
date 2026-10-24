@@ -5,7 +5,7 @@ use tokio::sync::OnceCell;
 
 use crate::{ArtifactSource, ResolvedArtifact};
 use anyhow::Result;
-use contract::{NetworkError, RegistryError};
+use contract::{NetworkError, RegistryConfig, RegistryError};
 use network::{Integrity, Network};
 use node_semver::{Range, Version};
 use package::{NpmPackage, PlatformConstraints, VersionRequirement};
@@ -16,14 +16,14 @@ type PackumentCell = Arc<OnceCell<Arc<NpmPackage>>>;
 #[derive(Debug)]
 pub struct NpmResolver {
     client: Network,
-    registry: String,
+    registry: RegistryConfig,
     packuments: Mutex<HashMap<String, PackumentCell>>,
 }
 
 impl NpmResolver {
-    pub fn new(registry: String) -> Self {
+    pub fn new(registry: RegistryConfig) -> Self {
         Self {
-            client: Network::new(),
+            client: Network::new(&registry),
             registry,
             packuments: Mutex::new(HashMap::new()),
         }
@@ -41,13 +41,14 @@ impl NpmResolver {
         };
         let packument = cell
             .get_or_try_init(|| async {
-                let url = format!("{}/{}", self.registry, name);
+                let registry = self.registry.registry_for(name);
+                let url = packument_url(registry, name);
                 debug::info!("Fetching {url}");
                 self.client
                     .fetch::<NpmPackage>(&url)
                     .await
                     .map(Arc::new)
-                    .map_err(|error| registry_error(name, &self.registry, error))
+                    .map_err(|error| registry_error(name, registry, error))
             })
             .await?;
         Ok(Arc::clone(packument))
@@ -88,6 +89,11 @@ impl NpmResolver {
 
         Ok(resolved)
     }
+}
+
+/// Scoped names are requested as `@scope%2fname`, as npm does; some registries require it.
+fn packument_url(registry: &str, name: &str) -> String {
+    format!("{registry}/{}", name.replace('/', "%2f"))
 }
 
 fn registry_error(name: &str, registry: &str, error: anyhow::Error) -> anyhow::Error {
@@ -150,7 +156,6 @@ fn published_versions(npm_package: &NpmPackage) -> impl Iterator<Item = (Version
 #[cfg(test)]
 mod tests {
     use super::*;
-    use contract::DEFAULT_REGISTRY;
     use serde_json::json;
 
     #[test]
@@ -202,7 +207,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_react_latest() {
-        let resolver = NpmResolver::new(DEFAULT_REGISTRY.to_string());
+        let resolver = NpmResolver::new(RegistryConfig::default());
         let artifact = resolver
             .resolve("react", &requirement("latest"))
             .await
@@ -218,7 +223,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_react_specific_version() {
-        let resolver = NpmResolver::new(DEFAULT_REGISTRY.to_string());
+        let resolver = NpmResolver::new(RegistryConfig::default());
         let artifact = resolver
             .resolve("react", &requirement("17.0.2"))
             .await
@@ -236,11 +241,23 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_invalid_package() {
-        let resolver = NpmResolver::new(DEFAULT_REGISTRY.to_string());
+        let resolver = NpmResolver::new(RegistryConfig::default());
         let result = resolver
             .resolve("invalid-package-name-12345", &requirement("latest"))
             .await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_scoped_packument_urls_are_encoded() {
+        assert_eq!(
+            packument_url("https://registry.npmjs.org", "@types/node"),
+            "https://registry.npmjs.org/@types%2fnode"
+        );
+        assert_eq!(
+            packument_url("https://registry.npmjs.org", "react"),
+            "https://registry.npmjs.org/react"
+        );
     }
 
     #[test]
