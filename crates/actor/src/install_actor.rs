@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+
 use contract::{Actor, Context, Pipeline, Result};
 use package::{InstallPackage, PackageJson};
-use pipeline::{InstallPipe, LinkerPipe};
+use pipeline::{InstallPipe, LinkerPipe, lockfile_from_graph};
+use resolver::ResolutionGraph;
 
 pub struct InstallActor {
     context: Context,
@@ -17,10 +20,31 @@ impl Actor<()> for InstallActor {
         debug::trace!("Installing packages from package.json: {packages:?}");
 
         let graph = InstallPipe::new(&self.context, packages).run().await?;
-        LinkerPipe::new(&self.context, graph).run().await?;
-
-        Ok(())
+        LinkerPipe::new(&self.context, graph.clone()).run().await?;
+        save_lockfile(&self.context, &graph, &manifest_specifiers(&package_json)).await
     }
+}
+
+/// Records `graph` in `craft.lock`, rewriting it only when something changed.
+pub(crate) async fn save_lockfile(
+    context: &Context,
+    graph: &ResolutionGraph,
+    specifiers: &HashMap<String, String>,
+) -> Result<()> {
+    lockfile_from_graph(graph, specifiers, &context.cwd)
+        .save(&context.cwd)
+        .await?;
+    Ok(())
+}
+
+/// Each declared dependency's spec as package.json lists it.
+pub(crate) fn manifest_specifiers(package_json: &PackageJson) -> HashMap<String, String> {
+    [&package_json.dependencies, &package_json.dev_dependencies]
+        .into_iter()
+        .flatten()
+        .flat_map(|section| section.iter())
+        .map(|(name, spec)| (name.clone(), spec.clone()))
+        .collect()
 }
 
 /// Every dependency and dev dependency the manifest declares, sorted by name so installs are
