@@ -198,6 +198,7 @@ mod tests {
                 tarball_url: String::new(),
             },
             integrity: None,
+            platform: Default::default(),
             package: None,
         }
     }
