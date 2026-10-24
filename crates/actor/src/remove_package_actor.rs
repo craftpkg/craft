@@ -5,7 +5,7 @@ use lockfile::Lockfile;
 use package::{DependencySection, PackageJson, ProjectManifest};
 use pipeline::prune_node_modules;
 
-use crate::lock_state::mark_installed;
+use crate::lock_state::{InstallMode, mark_installed};
 use crate::scripts::script_policy;
 use crate::summary::report_changes;
 use tokio::fs;
@@ -87,7 +87,11 @@ impl RemovePackageActor {
         lockfile.save(&self.context.cwd).await?;
         let package_json = PackageJson::from_file(&self.context.package_json_path()).await?;
         let policy = script_policy(&package_json, false);
-        mark_installed(&self.context, &lockfile, &policy).await?;
+        let mode = InstallMode {
+            policy: &policy,
+            production: false,
+        };
+        mark_installed(&self.context, &lockfile, &mode).await?;
         report_changes(&self.context, Some(&before), &lockfile);
         Ok(())
     }
