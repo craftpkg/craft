@@ -7,9 +7,11 @@ use contract::{Context, Pipeline, Result};
 use futures::stream::{self, StreamExt};
 use package::{DependencySpec, InstallPackage};
 use resolver::{
-    ArtifactSource, DependencyKind, Edge, NodeId, ResolutionGraph, ResolvedArtifact, ResolvedNode,
-    Resolver,
+    ArtifactSource, DependencyKind, Edge, NodeId, PeerDependency, ResolutionGraph,
+    ResolvedArtifact, ResolvedNode, Resolver,
 };
+
+use super::peers::resolve_peers;
 use tarball::gzip::unzip;
 use tokio::sync::Mutex;
 
@@ -77,15 +79,72 @@ impl InstallPipe {
             .with_context(|| failure_message(package, ancestry))?;
         let ancestry = [ancestry, std::slice::from_ref(&node_id)].concat();
         let dependencies = self.resolve_dependencies(&artifact, &ancestry).await?;
+        let peers = self
+            .resolve_peer_candidates(&artifact, &dependencies, &ancestry)
+            .await;
 
         self.nodes.lock().await.insert(
             node_id.clone(),
             ResolvedNode {
                 artifact,
                 dependencies,
+                peers,
             },
         );
         Ok(node_id)
+    }
+
+    /// Records the package's peers and resolves each required one on its own, so it can be
+    /// installed when nothing above the package provides it. A peer the package also lists as a
+    /// dependency is just that dependency. A candidate that fails to resolve is not an error:
+    /// the peer is usually provided.
+    async fn resolve_peer_candidates(
+        &self,
+        artifact: &ResolvedArtifact,
+        dependencies: &[Edge],
+        ancestry: &[NodeId],
+    ) -> Vec<PeerDependency> {
+        let Some(manifest) = &artifact.package else {
+            return Vec::new();
+        };
+        let is_link = matches!(artifact.source, ArtifactSource::Link { .. });
+        if is_link {
+            return Vec::new();
+        }
+
+        let declared = manifest
+            .peer_dependencies()
+            .into_iter()
+            .filter(|peer| !dependencies.iter().any(|edge| edge.name == peer.name));
+        let resolved = declared.map(|peer| async move {
+            let candidate = if peer.optional {
+                None
+            } else {
+                let package =
+                    InstallPackage::new(peer.name.clone(), Some(peer.range.clone()), false);
+                match self.resolve_package(&package, ancestry).await {
+                    Ok(node_id) => Some(node_id),
+                    Err(error) => {
+                        debug::warning!(
+                            "Peer {} of {} not resolvable: {error:#}",
+                            peer.name,
+                            artifact.name
+                        );
+                        None
+                    }
+                }
+            };
+            PeerDependency {
+                name: peer.name,
+                range: peer.range,
+                optional: peer.optional,
+                candidate,
+            }
+        });
+        stream::iter(resolved)
+            .buffered(DEPENDENCY_CONCURRENCY)
+            .collect()
+            .await
     }
 
     /// Downloads and extracts a registry package; other sources are materialized while
@@ -196,7 +255,11 @@ impl Pipeline<ResolutionGraph> for InstallPipe {
             name_bare_location(root, &nodes);
         }
 
-        Ok(ResolutionGraph { roots, nodes })
+        let resolved = resolve_peers(&ResolutionGraph { roots, nodes });
+        for warning in &resolved.warnings {
+            eprintln!("warning: {warning}");
+        }
+        Ok(resolved.graph)
     }
 }
 
