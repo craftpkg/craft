@@ -19,8 +19,8 @@ pub async fn unzip(source: PathBuf, dest: PathBuf) -> contract::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flate2::write::GzEncoder;
     use flate2::Compression;
+    use flate2::write::GzEncoder;
 
     #[tokio::test]
     async fn test_unzip() {
