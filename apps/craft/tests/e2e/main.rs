@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used)]
 
 mod add;
+mod cache;
 mod common;
 mod install;
 mod layout;
