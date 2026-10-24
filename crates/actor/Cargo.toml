@@ -10,6 +10,7 @@ workspace = true
 contract = { path = "../contract" }
 pipeline = { path = "../pipeline" }
 resolver = { path = "../resolver" }
+progress = { path = "../progress" }
 package = { path = "../package" }
 debug = { path = "../debug" }
 process = { path = "../process" }
