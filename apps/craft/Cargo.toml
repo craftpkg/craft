@@ -13,3 +13,10 @@ tokio = { version = "1.0", features = ["full"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+testkit = { path = "../../crates/testkit" }
+assert_cmd = "2.0"
+predicates = "3.1"
+serde_json = "1.0"
+tempfile = "3.10"
