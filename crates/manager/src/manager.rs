@@ -92,32 +92,126 @@ impl CraftManager {
 mod tests {
     use super::*;
     use cli::Commands;
+    use contract::Result;
+    use tempfile::TempDir;
 
     #[tokio::test]
-    async fn test_handle_start_command() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let manager = CraftManager::new(Context::new(
-            temp_dir.path().to_path_buf(),
-            temp_dir.path().join(".craft"),
-            false,
-        ));
-        // Just verifying it doesn't panic for now, as we are printing to stdout
-        let _ = manager.handle_command(Commands::Start).await;
+    async fn test_start_runs_start_script() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        write_package_json(
+            &temp_dir,
+            r#"{"scripts":{"start":"echo started > started.txt"}}"#,
+        )
+        .await?;
+
+        temp_manager(&temp_dir)
+            .handle_command(Commands::Start)
+            .await?;
+
+        assert!(temp_dir.path().join("started.txt").exists());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_handle_add_command() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let manager = CraftManager::new(Context::new(
+    async fn test_run_runs_named_script() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        write_package_json(
+            &temp_dir,
+            r#"{"scripts":{"greet":"echo hello > greeted.txt"}}"#,
+        )
+        .await?;
+
+        temp_manager(&temp_dir)
+            .handle_command(Commands::Run {
+                script: "greet".to_string(),
+                args: vec![],
+            })
+            .await?;
+
+        assert!(temp_dir.path().join("greeted.txt").exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_install_without_package_json_fails() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+
+        let result = temp_manager(&temp_dir)
+            .handle_command(Commands::Install)
+            .await;
+
+        let error = result.err().map(|e| e.to_string());
+        assert_eq!(error.as_deref(), Some("no package.json found"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_remove_drops_dependency_from_package_json() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        write_package_json(
+            &temp_dir,
+            r#"{"dependencies":{"ms":"^2.1.3","lodash":"^4.17.21"}}"#,
+        )
+        .await?;
+
+        temp_manager(&temp_dir)
+            .handle_command(Commands::Remove {
+                packages: vec!["ms".to_string()],
+            })
+            .await?;
+
+        let content = tokio::fs::read_to_string(temp_dir.path().join("package.json")).await?;
+        let package_json: serde_json::Value = serde_json::from_str(&content)?;
+        assert!(package_json["dependencies"].get("ms").is_none());
+        assert!(package_json["dependencies"].get("lodash").is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_cache_clean_with_force_empties_cache() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let manager = temp_manager(&temp_dir);
+        let cached_package = manager.context.package_cache_dir().join("ms-2.1.3");
+        tokio::fs::create_dir_all(&cached_package).await?;
+
+        manager
+            .handle_command(Commands::Cache {
+                command: CacheCommands::Clean { force: true },
+            })
+            .await?;
+
+        assert!(!cached_package.exists());
+        assert!(manager.context.package_cache_dir().exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_cache_clean_without_force_keeps_cache() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let manager = temp_manager(&temp_dir);
+        let cached_package = manager.context.package_cache_dir().join("ms-2.1.3");
+        tokio::fs::create_dir_all(&cached_package).await?;
+
+        manager
+            .handle_command(Commands::Cache {
+                command: CacheCommands::Clean { force: false },
+            })
+            .await?;
+
+        assert!(cached_package.exists());
+        Ok(())
+    }
+
+    fn temp_manager(temp_dir: &TempDir) -> CraftManager {
+        CraftManager::new(Context::new(
             temp_dir.path().to_path_buf(),
             temp_dir.path().join(".craft"),
             false,
-        ));
-        let _ = manager
-            .handle_command(Commands::Add {
-                packages: vec!["react".to_string()],
-                dev: false,
-            })
-            .await;
+        ))
+    }
+
+    async fn write_package_json(temp_dir: &TempDir, content: &str) -> Result<()> {
+        tokio::fs::write(temp_dir.path().join("package.json"), content).await?;
+        Ok(())
     }
 }
