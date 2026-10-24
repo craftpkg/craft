@@ -7,6 +7,7 @@ use pipeline::prune_node_modules;
 
 use crate::lock_state::mark_installed;
 use crate::scripts::script_policy;
+use crate::summary::report_changes;
 use tokio::fs;
 
 #[derive(Debug)]
@@ -58,7 +59,9 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
             }
 
             if !was_listed {
-                eprintln!("warning: {package_name} is not a dependency of this project");
+                self.context.reporter.warn(format!(
+                    "{package_name} is not a dependency of this project"
+                ));
             }
             is_changed |= was_listed;
         }
@@ -77,17 +80,16 @@ impl RemovePackageActor {
         let Some(mut lockfile) = Lockfile::load(&self.context.cwd).await? else {
             return Ok(());
         };
+        let before = lockfile.clone();
         for package_name in &self.payload.packages {
             lockfile.remove_dependency(package_name);
         }
         lockfile.save(&self.context.cwd).await?;
         let package_json = PackageJson::from_file(&self.context.package_json_path()).await?;
-        mark_installed(
-            &self.context,
-            &lockfile,
-            &script_policy(&package_json, false),
-        )
-        .await
+        let policy = script_policy(&package_json, false);
+        mark_installed(&self.context, &lockfile, &policy).await?;
+        report_changes(&self.context, Some(&before), &lockfile);
+        Ok(())
     }
 }
 
