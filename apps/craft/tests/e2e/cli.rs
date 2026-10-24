@@ -116,3 +116,66 @@ fn suggests_init_without_a_package_json() {
             "no package.json found; run `craft init` to create one",
         ));
 }
+
+fn publish_summary_packages(registry: &MockRegistry) {
+    registry
+        .publish(PackageFixture::new("ms", "2.1.3"))
+        .publish(PackageFixture::new("debug", "4.4.0").dependency("ms", "^2.1.3"))
+        .publish(PackageFixture::new("react", "18.3.1"))
+        .publish(PackageFixture::new("react", "19.2.0"));
+}
+
+#[test]
+fn summarizes_what_an_install_changed() {
+    let registry = MockRegistry::start();
+    publish_summary_packages(&registry);
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "debug": "^4.0.0", "react": "^19.0.0" }, "devDependencies": { "ms": "^2.0.0" } }),
+    );
+
+    project
+        .craft()
+        .arg("install")
+        .assert()
+        .success()
+        .stdout(contains(
+            "+ debug 4.4.0\n+ ms 2.1.3 (dev)\n+ react 19.2.0\n",
+        ))
+        .stdout(contains("3 packages installed in"));
+
+    project.write_file(
+        "package.json",
+        &json!({ "dependencies": { "debug": "^4.0.0", "react": "^18.0.0" } }).to_string(),
+    );
+    project
+        .craft()
+        .arg("install")
+        .assert()
+        .success()
+        .stdout(contains("- ms 2.1.3\n~ react 19.2.0 → 18.3.1\n"));
+
+    project
+        .craft()
+        .args(["remove", "debug"])
+        .assert()
+        .success()
+        .stdout("- debug 4.4.0\n");
+}
+
+#[test]
+fn silent_prints_nothing() {
+    let registry = MockRegistry::start();
+    publish_summary_packages(&registry);
+    let project = Project::new(&registry, json!({ "dependencies": { "debug": "^4.0.0" } }));
+
+    project
+        .craft()
+        .args(["--silent", "install"])
+        .assert()
+        .success()
+        .stdout("")
+        .stderr("");
+
+    assert!(project.require("debug").is_ok());
+}
