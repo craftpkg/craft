@@ -1,12 +1,9 @@
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use contract::{
-    Actor, CRAFT_VERSION, Context, PackageError, Result, ScriptError, node_cpu, node_os,
-};
+use contract::{Actor, Context, PackageError, Result, ScriptError};
 use package::PackageJson;
-use process::Process;
+use process::{Process, ScriptPackage};
 
 #[derive(Debug)]
 pub struct RunScriptActorPayload {
@@ -85,9 +82,7 @@ impl RunScriptActor {
             };
 
             debug::info!("Running {}: {}", event, command);
-            let process = Process::shell(&command)
-                .env("npm_lifecycle_event", &event)
-                .env("npm_lifecycle_script", script);
+            let process = Process::shell(&command).lifecycle(&event, script);
             self.run_process(&event, process, manifest).await?;
         }
         Ok(())
@@ -99,22 +94,16 @@ impl RunScriptActor {
         process: Process,
         manifest: Option<&PackageJson>,
     ) -> Result<()> {
-        let mut process = process
-            .current_dir(&self.context.cwd)
-            .env("PATH", script_path(&self.context.cwd)?)
-            .env("INIT_CWD", &self.context.cwd)
-            .env("npm_config_user_agent", user_agent())
-            .env("npm_package_json", self.context.package_json_path());
-        if let Some(manifest) = manifest {
-            if let Some(package_name) = &manifest.name {
-                process = process.env("npm_package_name", package_name);
-            }
-            if let Some(version) = &manifest.version {
-                process = process.env("npm_package_version", version);
-            }
-        }
-
-        let code = process.run().await?;
+        let manifest_path = self.context.package_json_path();
+        let package = ScriptPackage {
+            name: manifest.and_then(|manifest| manifest.name.as_deref()),
+            version: manifest.and_then(|manifest| manifest.version.as_deref()),
+            manifest_path: &manifest_path,
+        };
+        let code = process
+            .script_env(&self.context.cwd, &self.context.cwd, &package)?
+            .run()
+            .await?;
         if code != 0 {
             return Err(ScriptError::Failed {
                 name: name.to_string(),
@@ -146,16 +135,6 @@ fn find_bin(cwd: &Path, name: &str) -> Option<PathBuf> {
         .find(|bin| bin.is_file())
 }
 
-/// `PATH` with every `node_modules/.bin` from `cwd` up to the root in front, as npm sets it.
-fn script_path(cwd: &Path) -> Result<OsString> {
-    let bin_dirs = cwd
-        .ancestors()
-        .map(|dir| dir.join("node_modules").join(".bin"));
-    let inherited = std::env::var_os("PATH").unwrap_or_default();
-    let path = std::env::join_paths(bin_dirs.chain(std::env::split_paths(&inherited)))?;
-    Ok(path)
-}
-
 fn with_quoted_args(script: &str, args: &[String]) -> String {
     let mut command = script.to_string();
     for arg in args {
@@ -182,14 +161,6 @@ fn quote(arg: &str) -> String {
 #[cfg(windows)]
 fn quote(arg: &str) -> String {
     format!("\"{}\"", arg.replace('"', "\"\""))
-}
-
-/// npm's format (`<manager>/<version> <platform> <arch>`), which tools read to detect the
-/// package manager that started them.
-fn user_agent() -> String {
-    let platform = node_os(std::env::consts::OS);
-    let arch = node_cpu(std::env::consts::ARCH);
-    format!("craft/{CRAFT_VERSION} {platform} {arch}")
 }
 
 #[cfg(test)]
@@ -230,20 +201,6 @@ mod tests {
     }
 
     #[test]
-    fn test_path_starts_with_bin_dirs_from_cwd_up() {
-        let path = script_path(Path::new("/work/app")).unwrap();
-        let entries: Vec<PathBuf> = std::env::split_paths(&path).take(3).collect();
-        assert_eq!(
-            entries,
-            [
-                PathBuf::from("/work/app/node_modules/.bin"),
-                PathBuf::from("/work/node_modules/.bin"),
-                PathBuf::from("/node_modules/.bin"),
-            ]
-        );
-    }
-
-    #[test]
     fn test_find_bin_searches_ancestors_and_rejects_paths() {
         let dir = tempfile::tempdir().unwrap();
         let bin_dir = dir.path().join("node_modules/.bin");
@@ -255,10 +212,5 @@ mod tests {
         assert_eq!(find_bin(&nested, "tsc"), Some(bin_dir.join("tsc")));
         assert_eq!(find_bin(&nested, "eslint"), None);
         assert_eq!(find_bin(&nested, "../.bin/tsc"), None);
-    }
-
-    #[test]
-    fn test_user_agent_names_craft() {
-        assert!(user_agent().starts_with(&format!("craft/{CRAFT_VERSION} ")));
     }
 }
