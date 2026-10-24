@@ -1,9 +1,8 @@
 use contract::{NetworkError, Result};
 use reqwest::{Client, Response};
 use serde::de::DeserializeOwned;
-use std::path::PathBuf;
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub struct Network {
@@ -24,16 +23,12 @@ impl Network {
         Ok(data)
     }
 
-    /// Download a file from a URL and save it to the specified path
+    /// Downloads `from_url` to `store_path`, which only ever holds a complete download.
     pub async fn download(&self, from_url: &str, store_path: PathBuf) -> Result<()> {
         let response = successful(from_url, self.client.get(from_url).send().await?)?;
         let bytes = response.bytes().await?;
 
-        let mut file = File::create(store_path).await?;
-        file.write_all(&bytes).await?;
-        file.flush().await?;
-
-        Ok(())
+        tokio::task::spawn_blocking(move || write_atomically(&store_path, &bytes)).await?
     }
 }
 
@@ -56,6 +51,15 @@ fn successful(url: &str, response: Response) -> Result<Response> {
     .into())
 }
 
+/// Writes to a temp file beside `path`, then renames it into place.
+fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let mut file = tempfile::NamedTempFile::new_in(dir)?;
+    file.write_all(bytes)?;
+    file.persist(path)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,6 +68,18 @@ mod tests {
     fn test_network_new() {
         let network = Network::new();
         assert!(std::mem::size_of_val(&network.client) > 0);
+    }
+
+    #[test]
+    fn test_write_atomically_leaves_only_the_complete_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pkg-1.0.0.tgz");
+        std::fs::write(&path, "stale").unwrap();
+
+        write_atomically(&path, b"complete").unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"complete");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]
