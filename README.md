@@ -30,7 +30,9 @@ The script downloads the binary for your platform (a static build on musl/Alpine
 
 ### From a release
 
-Download a binary and its `.sha256` from the [Releases](https://github.com/craftpkg/craft/releases) page: Linux (x64 and arm64, glibc and musl), macOS (Intel and Apple Silicon). Windows binaries are published too, but Windows support is still experimental.
+Download a binary and its `.sha256` from the [Releases](https://github.com/craftpkg/craft/releases) page: Linux (x64 and arm64, glibc and musl), macOS (Intel and Apple Silicon) and Windows (x64).
+
+On Windows, directory links are junctions and bins get `.cmd`, `.ps1` and sh shims like npm's, so neither administrator rights nor Developer Mode are needed; scripts run through `cmd`.
 
 ### From source
 
@@ -107,7 +109,7 @@ Supported keys: `registry`, `@scope:registry`, `//host/:_authToken`, `_auth`, `u
 
 ## 🤝 Contributing
 
-Contributions are welcome! `make` runs formatting, lints and the full test suite against a local mock registry (the end-to-end tests need Node.js on `PATH`). `make real-world` runs scenarios with real packages against registry.npmjs.org and GitHub.
+Contributions are welcome! `make` runs formatting, lints and the full test suite against a local mock registry (the end-to-end tests need Node.js on `PATH`). `make real-world` runs scenarios with real packages against registry.npmjs.org and GitHub, and `docker/windows/test.sh` cross-compiles the tests for Windows and runs them under Wine.
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
