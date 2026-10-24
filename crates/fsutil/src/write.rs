@@ -2,11 +2,19 @@ use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::context::PathContext;
+
 static STAGING_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Writes `contents` to `path` through a temp file renamed into place, so readers never see a
 /// partial file. Returns `false` without writing when `path` already holds `contents`.
 pub async fn write_if_changed(path: &Path, contents: &[u8]) -> io::Result<bool> {
+    write_if_changed_inner(path, contents)
+        .await
+        .at("write", path)
+}
+
+async fn write_if_changed_inner(path: &Path, contents: &[u8]) -> io::Result<bool> {
     let is_unchanged = tokio::fs::read(path)
         .await
         .is_ok_and(|existing| existing == contents);
