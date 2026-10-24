@@ -76,7 +76,8 @@ impl Project {
             .env("CRAFT_HOME", self.craft_home())
             .env("CRAFT_REGISTRY", &self.registry_url)
             .env("HOME", self.craft_home())
-            .env_remove("NODE_PATH");
+            .env_remove("NODE_PATH")
+            .env_remove("CI");
 
         for proxy_var in PROXY_VARS {
             command.env_remove(proxy_var);
