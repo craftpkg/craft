@@ -315,7 +315,14 @@ fn git_repository(project: &Project) -> String {
             None => {}
         }
     }
-    format!("file://{}", repository.display())
+    file_url(&repository)
+}
+
+/// `file:///C:/…` on Windows, where `file://C:\…` is not a URL git understands.
+fn file_url(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    let separator = if path.starts_with('/') { "" } else { "/" };
+    format!("file://{separator}{path}")
 }
 
 fn commit_all(repository: &std::path::Path, message: &str) {
