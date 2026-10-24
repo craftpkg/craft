@@ -476,6 +476,7 @@ fn keeps_the_first_package_alphabetically_when_bins_conflict() {
     );
 
     for _ in 0..3 {
+        let _ = std::fs::remove_dir_all(project.path().join("node_modules"));
         project
             .craft()
             .arg("install")
