@@ -6,12 +6,14 @@ use resolver::{ArtifactSource, Edge, ResolvedArtifact};
 
 use crate::install_actor::{manifest_packages, manifest_specifiers};
 use crate::lock_state::{save_lockfile, with_lock_preference};
+use crate::scripts::{run_install_scripts, script_policy};
 
 #[derive(Debug)]
 pub struct AddActorPayload {
     pub packages: Vec<String>,
     pub is_dev: bool,
     pub is_exact: bool,
+    pub ignore_scripts: bool,
 }
 
 impl std::fmt::Display for AddActorPayload {
@@ -63,6 +65,8 @@ impl Actor<AddActorPayload> for AddPackageActor {
             .retain(|root| !added_roots.iter().any(|added| added.name == root.name));
         graph.roots.extend(added_roots.iter().cloned());
         LinkerPipe::new(&self.context, graph.clone()).run().await?;
+        let policy = script_policy(&package_json, self.payload.ignore_scripts);
+        run_install_scripts(&self.context, graph.clone(), &package_json, &policy, false).await?;
 
         let section = if self.payload.is_dev {
             DependencySection::DevDependencies
@@ -79,7 +83,7 @@ impl Actor<AddActorPayload> for AddPackageActor {
 
         manifest.save().await?;
         debug::info!("Updated package.json");
-        save_lockfile(&self.context, &graph, &specifiers).await
+        save_lockfile(&self.context, &graph, &specifiers, &policy).await
     }
 }
 
@@ -135,6 +139,7 @@ mod tests {
             packages: vec!["react".to_string(), "lodash".to_string()],
             is_dev: false,
             is_exact: false,
+            ignore_scripts: false,
         };
 
         assert_eq!(format!("{}", payload), "react lodash");
@@ -146,6 +151,7 @@ mod tests {
             packages: vec!["test".to_string()],
             is_dev: true,
             is_exact: false,
+            ignore_scripts: false,
         };
 
         let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false);
