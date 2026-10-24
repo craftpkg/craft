@@ -1,3 +1,4 @@
+use predicates::prelude::*;
 use predicates::str::contains;
 use serde_json::{Value, json};
 use testkit::{MockRegistry, PackageFixture};
@@ -226,4 +227,53 @@ fn runs_the_projects_own_lifecycle_scripts_in_order() {
         project.read_file("lifecycle.txt"),
         "preinstall\npostinstall\nprepare\n"
     );
+}
+
+#[test]
+fn craft_ci_with_ignore_scripts_runs_nothing() {
+    let registry = MockRegistry::start();
+    registry.publish(native("native", WRITE_BUILT));
+    let mut package_json = with_trusted(json!({ "native": "^1.0.0" }), &["native"]);
+    package_json["scripts"] = json!({ "postinstall": "touch project-built.txt" });
+    let project = Project::new(&registry, package_json);
+    project
+        .craft()
+        .args(["install", "--ignore-scripts"])
+        .assert()
+        .success();
+
+    project
+        .craft()
+        .args(["ci", "--ignore-scripts"])
+        .assert()
+        .success();
+
+    assert!(!entry_file(&project, "native@1.0.0", "native", "built.txt").exists());
+    assert!(!project.path().join("project-built.txt").exists());
+
+    project.craft().arg("ci").assert().success();
+    assert!(entry_file(&project, "native@1.0.0", "native", "built.txt").exists());
+    assert!(project.path().join("project-built.txt").exists());
+}
+
+#[test]
+fn shows_build_output_only_with_debug() {
+    let registry = MockRegistry::start();
+    registry.publish(native("native", "echo compiling native addon"));
+    let package_json = with_trusted(json!({ "native": "^1.0.0" }), &["native"]);
+    let quiet = Project::new(&registry, package_json.clone());
+    let debug = quiet.sibling(package_json);
+
+    quiet
+        .craft()
+        .arg("install")
+        .assert()
+        .success()
+        .stderr(contains("compiling native addon").not());
+    debug
+        .craft()
+        .args(["--debug", "install"])
+        .assert()
+        .success()
+        .stderr(contains("compiling native addon"));
 }
