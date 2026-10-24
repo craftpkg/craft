@@ -5,6 +5,26 @@ use testkit::{MockRegistry, PackageFixture};
 use crate::common::{Project, block_on};
 
 #[test]
+fn installs_packages_whose_manifest_has_non_string_entries() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("speakingurl", "14.0.1").manifest_field(
+        "scripts",
+        json!({ "test": "mocha", "blanket": { "pattern": ["/lib/"] } }),
+    ));
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "speakingurl": "^14.0.0" } }),
+    );
+
+    project.craft().arg("install").assert().success();
+
+    assert_eq!(
+        project.required_version("speakingurl"),
+        Ok("14.0.1".to_string())
+    );
+}
+
+#[test]
 fn installs_dependencies_and_their_subtree() {
     let registry = MockRegistry::start();
     registry
