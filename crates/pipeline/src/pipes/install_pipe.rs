@@ -87,13 +87,13 @@ impl InstallPipe {
     }
 
     async fn fetch(&self, artifact: &ResolvedArtifact) -> Result<()> {
-        let download_artifact = self.resolver.download(artifact).await?;
         let package_dir = self.context.package_dir(&artifact.name, &artifact.version);
-
         if package_dir.exists() {
             debug::info!("Package {} already unzipped", artifact.name);
             return Ok(());
         }
+
+        let download_artifact = self.resolver.download(artifact).await?;
         unzip(download_artifact.path, package_dir).await
     }
 
