@@ -24,12 +24,7 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
         for package_name in &self.payload.packages {
             let package_path = node_modules.join(package_name);
 
-            if package_path.exists() {
-                if package_path.is_symlink() {
-                    fs::remove_file(&package_path).await?;
-                } else {
-                    fs::remove_dir_all(&package_path).await?;
-                }
+            if fsutil::remove_entry(&package_path).await? {
                 debug::info!("Removed {} from node_modules", package_name);
             } else {
                 debug::warning!("Package {} not found in node_modules", package_name);
