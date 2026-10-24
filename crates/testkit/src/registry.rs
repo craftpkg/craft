@@ -40,6 +40,8 @@ struct RegistryState {
     user_agents: Vec<Option<String>>,
     /// Requests left to fail, with the status and `Retry-After` to fail them with.
     pending_failures: Option<(usize, u16, Option<u64>)>,
+    in_flight: usize,
+    max_in_flight: usize,
 }
 
 impl MockRegistry {
@@ -137,6 +139,11 @@ impl MockRegistry {
     pub fn fail_next(&self, count: usize, status: u16, retry_after: Option<u64>) -> &Self {
         lock(&self.state).pending_failures = Some((count, status, retry_after));
         self
+    }
+
+    /// The most requests that were being answered at the same time.
+    pub fn max_concurrent_requests(&self) -> usize {
+        lock(&self.state).max_in_flight
     }
 
     /// The `User-Agent` header of every request so far, in order.
@@ -265,6 +272,21 @@ fn decode_path(url: &str) -> String {
 /// Answers one GET per connection and closes it, so clients never hold idle keep-alive
 /// connections open against the registry.
 fn serve(stream: &TcpStream, state: &Mutex<RegistryState>) {
+    {
+        let mut state = lock(state);
+        state.in_flight += 1;
+        state.max_in_flight = state.max_in_flight.max(state.in_flight);
+    }
+    answer(stream, state);
+    lock(state).in_flight -= 1;
+}
+
+/// A short pause before answering, so requests that arrive together overlap and concurrency
+/// limits become observable.
+const RESPONSE_DELAY: std::time::Duration = std::time::Duration::from_millis(5);
+
+fn answer(stream: &TcpStream, state: &Mutex<RegistryState>) {
+    std::thread::sleep(RESPONSE_DELAY);
     let mut reader = BufReader::new(stream);
     let mut request_line = String::new();
     if reader.read_line(&mut request_line).is_err() {
