@@ -42,6 +42,24 @@ pub struct PeerSpec {
 }
 
 impl PackageJson {
+    /// `optionalDependencies`, read loosely like peers. npm installs these in place of a
+    /// `dependencies` entry of the same name.
+    pub fn optional_dependencies(&self) -> Vec<(String, String)> {
+        let Some(optional) = self
+            .other
+            .get("optionalDependencies")
+            .and_then(serde_json::Value::as_object)
+        else {
+            return Vec::new();
+        };
+        let mut dependencies: Vec<(String, String)> = optional
+            .iter()
+            .filter_map(|(name, spec)| Some((name.clone(), spec.as_str()?.to_string())))
+            .collect();
+        dependencies.sort();
+        dependencies
+    }
+
     /// Declared peers, sorted by name. Read loosely from the raw manifest, since registries
     /// serve these fields as-is.
     pub fn peer_dependencies(&self) -> Vec<PeerSpec> {
@@ -129,6 +147,22 @@ mod tests {
                     range: "*".to_string(),
                     optional: true,
                 },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_reads_optional_dependencies() {
+        let manifest: PackageJson = serde_json::from_str(
+            r#"{ "optionalDependencies": { "fsevents": "~2.3.2", "@esbuild/darwin-arm64": "0.25.0", "bad": 1 } }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            manifest.optional_dependencies(),
+            [
+                ("@esbuild/darwin-arm64".to_string(), "0.25.0".to_string()),
+                ("fsevents".to_string(), "~2.3.2".to_string()),
             ]
         );
     }
