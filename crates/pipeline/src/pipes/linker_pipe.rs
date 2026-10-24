@@ -5,26 +5,24 @@ use std::sync::Arc;
 use contract::{Context, Pipeline, Result};
 use futures::stream::{self, StreamExt};
 use node_semver::{Range, Version};
-use package::{InstallPackage, PackageBin};
+use package::PackageBin;
 use resolver::ResolvedArtifact;
 use tokio::fs;
+
+use crate::pipes::install_pipe::{Installation, ResolvedRoot};
 
 pub struct LinkerPipe {
     context: Context,
     artifacts: Vec<ResolvedArtifact>,
-    root_packages: Vec<InstallPackage>,
+    roots: Vec<ResolvedRoot>,
 }
 
 impl LinkerPipe {
-    pub fn new(
-        context: &Context,
-        artifacts: Vec<ResolvedArtifact>,
-        root_packages: Vec<InstallPackage>,
-    ) -> Self {
+    pub fn new(context: &Context, installation: Installation) -> Self {
         Self {
             context: context.clone(),
-            artifacts,
-            root_packages,
+            artifacts: installation.artifacts,
+            roots: installation.roots,
         }
     }
 
@@ -58,22 +56,7 @@ impl LinkerPipe {
                 if let Some(candidates) = artifact_map.get(dep_name) {
                     let req = Range::parse(dep_version).unwrap_or_else(|_| Range::any());
 
-                    // Find the candidate that satisfies the version requirement
-                    // We prefer the highest version that satisfies it
-                    let best_match = candidates
-                        .iter()
-                        .filter(|c| {
-                            if let Ok(ver) = Version::parse(&c.version) {
-                                req.satisfies(&ver)
-                            } else {
-                                false
-                            }
-                        })
-                        .max_by(|a, b| {
-                            let ver_a = Version::parse(&a.version).expect("should not panic");
-                            let ver_b = Version::parse(&b.version).expect("should not panic");
-                            ver_a.partial_cmp(&ver_b).expect("should not panic")
-                        });
+                    let best_match = highest_satisfying(candidates, &req);
 
                     if let Some(dep_artifact) = best_match {
                         let dep_source_dir = self.package_dir(dep_artifact);
@@ -110,62 +93,9 @@ impl LinkerPipe {
     }
 
     /// Links a root package to the project's node_modules
-    async fn link_root_package(
-        &self,
-        package: &InstallPackage,
-        artifact_map: &HashMap<String, Vec<ResolvedArtifact>>,
-    ) -> Result<()> {
-        debug::info!("Linking root package: {}", package.name);
-
-        // Find the artifact for this package
-        // For root packages, we usually want the one that was resolved for it.
-        // Since we don't have the exact resolution map here, we'll find the best match
-        // based on the requested version (or latest if not specified).
-        // In practice, InstallPipe resolved it, so it must be in artifacts.
-
-        let candidates = match artifact_map.get(&package.name) {
-            Some(c) => c,
-            None => {
-                debug::warning!("Root package {} not found in artifacts", package.name);
-                return Ok(());
-            }
-        };
-
-        let best_match = if let Some(req_version) = &package.version {
-            let req = Range::parse(req_version).unwrap_or_else(|_| Range::any());
-            candidates
-                .iter()
-                .filter(|c| {
-                    if let Ok(ver) = Version::parse(&c.version) {
-                        req.satisfies(&ver)
-                    } else {
-                        false
-                    }
-                })
-                .max_by(|a, b| {
-                    let ver_a = Version::parse(&a.version).expect("should not panic");
-                    let ver_b = Version::parse(&b.version).expect("should not panic");
-                    ver_a.partial_cmp(&ver_b).expect("should not panic")
-                })
-        } else {
-            // If no version specified, pick the highest version available
-            candidates.iter().max_by(|a, b| {
-                let ver_a = Version::parse(&a.version).expect("should not panic");
-                let ver_b = Version::parse(&b.version).expect("should not panic");
-                ver_a.partial_cmp(&ver_b).expect("should not panic")
-            })
-        };
-
-        let artifact = match best_match {
-            Some(a) => a,
-            None => {
-                debug::warning!(
-                    "No matching artifact found for root package {}",
-                    package.name
-                );
-                return Ok(());
-            }
-        };
+    async fn link_root_package(&self, root: &ResolvedRoot) -> Result<()> {
+        debug::info!("Linking root package: {}", root.package.name);
+        let artifact = &root.artifact;
 
         // Source path in global cache
         let source_dir = self.package_dir(artifact);
@@ -212,10 +142,9 @@ impl LinkerPipe {
         artifact: &ResolvedArtifact,
         node_modules_dir: &std::path::Path,
     ) -> Result<()> {
-        if artifact.package.is_none() {
+        let Some(pkg_json) = &artifact.package else {
             return Ok(());
-        }
-        let pkg_json = artifact.package.as_ref().expect("package is not present");
+        };
         if let Some(bin) = &pkg_json.bin {
             let bin_dir = node_modules_dir.join(".bin");
             fs::create_dir_all(&bin_dir).await?;
@@ -306,12 +235,9 @@ impl Pipeline<()> for LinkerPipe {
 
         debug::trace!("LINKED NON_ROOT PACKAGES");
         // 2. Link root packages to project node_modules
-        let root_packages = self.root_packages.clone();
-        let linking_results: Vec<Result<()>> = stream::iter(root_packages)
-            .map(|pkg| {
-                let map = artifact_map.clone();
-                async move { self.link_root_package(&pkg, &map).await }
-            })
+        let roots = self.roots.clone();
+        let linking_results: Vec<Result<()>> = stream::iter(roots)
+            .map(|root| async move { self.link_root_package(&root).await })
             .buffer_unordered(10)
             .collect()
             .await;
@@ -324,9 +250,24 @@ impl Pipeline<()> for LinkerPipe {
     }
 }
 
+fn highest_satisfying<'a>(
+    candidates: &'a [ResolvedArtifact],
+    range: &Range,
+) -> Option<&'a ResolvedArtifact> {
+    candidates
+        .iter()
+        .filter_map(|candidate| {
+            let version = Version::parse(&candidate.version).ok()?;
+            range.satisfies(&version).then_some((version, candidate))
+        })
+        .max_by(|(a, _), (b, _)| a.cmp(b))
+        .map(|(_, candidate)| candidate)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use package::InstallPackage;
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
@@ -380,7 +321,14 @@ mod tests {
         let root_pkg =
             InstallPackage::new(pkg_name.to_string(), Some(pkg_version.to_string()), false);
 
-        let pipe = LinkerPipe::new(&context, vec![artifact], vec![root_pkg]);
+        let installation = Installation {
+            artifacts: vec![artifact.clone()],
+            roots: vec![ResolvedRoot {
+                package: root_pkg,
+                artifact,
+            }],
+        };
+        let pipe = LinkerPipe::new(&context, installation);
         pipe.run().await?;
 
         // Verify
