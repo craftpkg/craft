@@ -59,8 +59,8 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 2.4 | Bins inside the virtual store | P1 | [x] |
 | 2.5 | Prune extraneous packages | P1 | [x] |
 | **Phase 3 — Lockfile** | | | |
-| 3.1 | Lockfile format (text, deterministic) | P0 | [ ] |
-| 3.2 | Write lockfile after install/add/remove | P0 | [ ] |
+| 3.1 | Lockfile format (text, deterministic) | P0 | [x] |
+| 3.2 | Write lockfile after install/add/remove | P0 | [x] |
 | 3.3 | Install from lockfile (skip resolution) | P0 | [ ] |
 | 3.4 | `--frozen-lockfile` / `craft ci` | P1 | [ ] |
 | **Phase 4 — Platform packages & lifecycle scripts** | | | |
@@ -543,7 +543,9 @@ project/node_modules/
 `crates/lockfile` exists (JSON + bincode, `Lockfile { version, packages }`), but nothing depends on it.
 README says "`package-lock.json` support (coming soon)" — decide whether that means *reading* npm's lockfile (Phase 7) or Craft's own.
 
-### 3.1 Lockfile format · P0
+### 3.1 Lockfile format · P0 — ✔ done
+
+> Done: the `lockfile` crate was rewritten as format types only (bincode and the old `PackageEntry` dropped). `craft.lock` is pretty JSON with sorted maps and a trailing newline: `lockfileVersion`, `importers["."]` (`dependencies` / `devDependencies` → `{ specifier, version }`), and `packages` keyed by instance id (`ui@1.0.0_react@19.2.0`) with `name`, `version`, a tagged `resolution` (`registry` with tarball + integrity, `tarball`, `localTarball`, `directory`, `link`, `git` with commit) and `dependencies` / `peerDependencies` as package keys. Local paths and the keys of local packages are relative to the project, so the file is identical on every machine. A newer `lockfileVersion` is rejected with an upgrade hint. `os` / `cpu` / `optionalDependencies` / `hasBin` come with Phase 4.
 
 - File: `craft.lock` at project root, **text** (JSON or YAML) with stable, sorted keys (`BTreeMap`), trailing newline — it must be reviewable in PRs. Drop bincode as the primary format (optionally keep a binary cache under `node_modules/.craft` for speed).
 - Contents:
@@ -571,7 +573,9 @@ README says "`package-lock.json` support (coming soon)" — decide whether that 
 
 - `importers` keeps room for workspaces (Phase 7).
 
-### 3.2 Write lockfile · P0
+### 3.2 Write lockfile · P0 — ✔ done
+
+> Done: `pipeline::lockfile_from_graph` serializes the peer-resolved graph, taking each importer specifier from package.json (so `craft add ms` locks `^2.1.3`, not `ms`). `install` and `add` write it after linking; `remove` edits the existing lockfile directly — dropping the importer entry and every package nothing else reaches — without touching the network. Writes are atomic and skipped when unchanged (`fsutil::write_if_changed`).
 
 - Serialize the `ResolutionGraph` (1.2) after every successful `install`/`add`/`remove`; write atomically; only write when contents changed.
 
