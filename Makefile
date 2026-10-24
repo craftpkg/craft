@@ -1,4 +1,4 @@
-.PHONY: build test lint craft
+.PHONY: build test lint fmt craft
 
 all: build test lint
 
@@ -9,7 +9,11 @@ test:
 	cargo test
 
 lint:
-	cargo clippy --workspace -- -D warnings
+	cargo fmt --all --check
+	cargo clippy --workspace --all-targets -- -D warnings
+
+fmt:
+	cargo fmt --all
 
 craft:
 	cargo run -p craft -- $(filter-out $@,$(MAKECMDGOALS))
