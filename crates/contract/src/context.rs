@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use crate::constants::{CRAFT_HOME, CRAFT_REGISTRY, DEFAULT_REGISTRY};
+use crate::constants::{CRAFT_HOME, CRAFT_REGISTRY, DEFAULT_REGISTRY, STORE_VERSION};
 use crate::{ContextError, Result};
 
 #[derive(Debug, Clone)]
@@ -41,14 +41,14 @@ impl Context {
         self
     }
 
-    pub fn package_cache_dir(&self) -> PathBuf {
-        self.craft_home.join("packages")
+    /// The global store of extracted packages, shared by every project.
+    pub fn store_dir(&self) -> PathBuf {
+        self.craft_home.join("store").join(STORE_VERSION)
     }
 
-    pub fn package_dir(&self, name: &str, version: &str) -> PathBuf {
-        self.package_cache_dir()
-            .join(format!("{name}-{version}"))
-            .join("package")
+    /// Where packages were cached before the store; no longer written, only cleaned.
+    pub fn legacy_cache_dir(&self) -> PathBuf {
+        self.craft_home.join("packages")
     }
 
     pub fn node_modules_dir(&self) -> PathBuf {
@@ -122,8 +122,8 @@ mod tests {
     fn test_paths_derive_from_context() {
         let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false);
         assert_eq!(
-            context.package_cache_dir(),
-            PathBuf::from("/home/me/.craft/packages")
+            context.store_dir(),
+            PathBuf::from("/home/me/.craft/store/v1")
         );
         assert_eq!(
             context.node_modules_dir(),
@@ -134,8 +134,8 @@ mod tests {
             PathBuf::from("/work/app/package.json")
         );
         assert_eq!(
-            context.package_dir("@types/node", "22.20.5"),
-            PathBuf::from("/home/me/.craft/packages/@types/node-22.20.5/package")
+            context.legacy_cache_dir(),
+            PathBuf::from("/home/me/.craft/packages")
         );
     }
 }
