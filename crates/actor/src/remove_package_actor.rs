@@ -1,29 +1,24 @@
-use contract::{Actor, Result};
+use contract::{Actor, Context, Result};
 use package::PackageJson;
-use std::path::PathBuf;
 use tokio::fs;
 
 #[derive(Debug)]
 pub struct RemoveActorPayload {
     pub packages: Vec<String>,
-    pub working_dir: Option<PathBuf>,
 }
 
 pub struct RemovePackageActor {
+    context: Context,
     payload: RemoveActorPayload,
 }
 
 impl Actor<RemoveActorPayload> for RemovePackageActor {
-    fn with(payload: RemoveActorPayload) -> Self {
-        Self { payload }
+    fn with(context: Context, payload: RemoveActorPayload) -> Self {
+        Self { context, payload }
     }
 
     async fn run(&self) -> Result<()> {
-        let cwd =
-            self.payload.working_dir.clone().unwrap_or_else(|| {
-                std::env::current_dir().expect("Failed to get current directory")
-            });
-        let node_modules = cwd.join("node_modules");
+        let node_modules = self.context.node_modules_dir();
 
         // Remove packages from node_modules
         for package_name in &self.payload.packages {
@@ -42,7 +37,7 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
         }
 
         // Update package.json if it exists
-        let package_json_path = cwd.join("package.json");
+        let package_json_path = self.context.package_json_path();
 
         if package_json_path.exists() {
             let content = fs::read_to_string(&package_json_path).await?;
@@ -93,10 +88,9 @@ mod tests {
 
         let payload = RemoveActorPayload {
             packages: vec!["test-package".to_string()],
-            working_dir: Some(temp_dir.path().to_path_buf()),
         };
 
-        let actor = RemovePackageActor::with(payload);
+        let actor = RemovePackageActor::with(temp_context(&temp_dir), payload);
         let result = actor.run().await;
 
         assert!(result.is_ok());
@@ -125,10 +119,9 @@ mod tests {
 
         let payload = RemoveActorPayload {
             packages: vec!["react".to_string(), "typescript".to_string()],
-            working_dir: Some(temp_dir.path().to_path_buf()),
         };
 
-        let actor = RemovePackageActor::with(payload);
+        let actor = RemovePackageActor::with(temp_context(&temp_dir), payload);
         let result = actor.run().await;
 
         assert!(result.is_ok());
@@ -158,10 +151,9 @@ mod tests {
 
         let payload = RemoveActorPayload {
             packages: vec!["nonexistent-package".to_string()],
-            working_dir: Some(temp_dir.path().to_path_buf()),
         };
 
-        let actor = RemovePackageActor::with(payload);
+        let actor = RemovePackageActor::with(temp_context(&temp_dir), payload);
         let result = actor.run().await;
 
         // Should succeed even if package doesn't exist
@@ -172,9 +164,16 @@ mod tests {
     fn test_remove_actor_payload_creation() {
         let payload = RemoveActorPayload {
             packages: vec!["test".to_string()],
-            working_dir: None,
         };
 
         assert_eq!(payload.packages.len(), 1);
+    }
+
+    fn temp_context(temp_dir: &tempfile::TempDir) -> Context {
+        Context::new(
+            temp_dir.path().to_path_buf(),
+            temp_dir.path().join(".craft"),
+            false,
+        )
     }
 }
