@@ -443,7 +443,7 @@ Can be split: tarball URL + `file:` + `link:` first (simple), git hosts second.
 Target layout (pnpm-style, proven to work with Node's realpath resolution):
 
 ```
-~/.craft/store/v1/<name>@<version>/            # immutable extracted package (2.1)
+~/.craft/store/v1/<name>@<version>-<hash12>/   # immutable extracted package (2.1)
 
 project/node_modules/
 ├── .craft/                                    # virtual store (2.2)
@@ -458,6 +458,32 @@ project/node_modules/
 ├── react                  -> .craft/react@19.2.0/node_modules/react
 └── @tanstack/react-query  -> ../.craft/@tanstack+react-query@5.90.10_react@19.2.0/node_modules/@tanstack/react-query
 ```
+
+### Phase 2 design
+
+**Store (2.1)** — `~/.craft/store/v1/<escaped-name>@<version>-<hash12>/`, where `hash12` is the first 12 hex chars of sha256 over the integrity string (registry `dist.integrity`, the computed sha512 for tarball sources, `url#sha` for git). Readable when debugging, collision-free across registries. Entries are extracted atomically (1.6) and never written to again; the downloaded `.tgz` is deleted once extracted. `file:` directories and `link:` targets don't go through the store. The old `~/.craft/packages/` is ignored (no migration); `craft cache clean` removes both.
+
+**Virtual store (2.2)** — each graph node becomes `node_modules/.craft/<id>/node_modules/<name>/`:
+- `<id>` = `<escaped-name>@<version>` (`@scope/x` → `@scope+x`); non-registry nodes use `name@<source>+<hash12>`; peer variants (2.3) append `_<peer>@<ver>…`. Ids longer than 120 chars are truncated + hashed, like pnpm.
+- Files are imported from the store per file: **clone** (APFS `clonefile`, Linux `FICLONE` via `reflink-copy`) → **hardlink** → **copy**, falling back once per install when a method isn't supported (e.g. cross-device). Clones mean editing a file in `node_modules` never corrupts the store; hardlinks (ext4) share it, as pnpm accepts.
+- A node's dependencies are relative symlinks next to it: `.craft/<id>/node_modules/<dep-name> -> ../../<dep-id>/node_modules/<dep-pkg>`. Aliases use the edge name as the link name.
+- Root edges: `node_modules/<edge.name> -> .craft/<id>/node_modules/<pkg>` (relative). `link:` roots stay direct symlinks to their target.
+- Import is staged and renamed, and skipped when the entry exists (ids are immutable; `file:` directory nodes are re-imported every install).
+- **Hidden hoisting**: every package name is also linked once into `node_modules/.craft/node_modules/<name>` (highest version wins). Node's lookup from inside `.craft/<id>/…` reaches that directory, so packages that `require` an undeclared dependency (phantom deps, common in older packages) still work — pnpm's default `hoist-pattern=*`. Root `node_modules` stays strict: only direct deps are visible to the project.
+- Every write is under the project's `node_modules`, so projects can't affect each other; the shared store is append-only.
+
+**Bins (2.4)** — `.craft/<id>/node_modules/.bin` per node for its dependencies (lifecycle scripts in 4.3 need them); root `.bin` only for direct dependencies, as now.
+
+**Prune (2.5)** — after linking: remove `.craft/<id>` entries and root `node_modules` entries (and their bins) that aren't in the graph. Replaces leftover links from the old layout too.
+
+**Peers (2.3)** — after the normal resolution pass, a second pass walks from the roots: a node's peer resolves to what its parent can see (the parent's dependencies, then the parent's own resolved peers, recursively); unresolved non-optional peers are auto-installed at the top level (npm ≥ 7). A node is duplicated per distinct peer resolution, which is what the `_peer@ver` id suffix encodes. Unmet ranges warn; `--strict-peer-dependencies` fails.
+
+**Order**: 2.1 store → 2.2 virtual store + 2.4 bins → 2.5 prune → 2.3 peers. Each lands green on its own; the e2e suite already covers the observable behaviour, plus new tests for isolation (two projects, different versions, same store), deleting `~/.craft` after install, phantom deps via hidden hoisting, and peers.
+
+**Decisions (confirmed)**
+1. Import method: clone → hardlink → copy.
+2. Hidden hoisting into `.craft/node_modules` on by default.
+3. No migration of `~/.craft/packages`; it just stops being used.
 
 ### 2.1 Global content-addressed store · P0
 
