@@ -1,3 +1,4 @@
+use anyhow::Context;
 use contract::{PackageError, Result};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path};
@@ -11,11 +12,7 @@ pub struct PackageJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub scripts: Option<HashMap<String, String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub keywords: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dependencies: Option<HashMap<String, String>>,
     #[serde(rename = "devDependencies")]
@@ -43,7 +40,8 @@ impl PackageJson {
         }
 
         let content = fs::read_to_string(package_json_path).await?;
-        let package_json: PackageJson = serde_json::from_str(&content)?;
+        let package_json: PackageJson = serde_json::from_str(&content)
+            .with_context(|| format!("failed to parse {}", package_json_path.display()))?;
         Ok(package_json)
     }
 }
@@ -63,4 +61,18 @@ pub struct NpmPackage {
     #[serde(rename = "dist-tags")]
     pub dist_tags: HashMap<String, String>,
     pub versions: HashMap<String, PackageJson>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tolerates_loosely_typed_metadata_fields() {
+        let manifest: PackageJson = serde_json::from_str(
+            r#"{ "name": "lodash", "keywords": "modules, stdlib, util", "description": ["odd"] }"#,
+        )
+        .unwrap();
+        assert_eq!(manifest.name.as_deref(), Some("lodash"));
+    }
 }
