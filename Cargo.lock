@@ -1140,6 +1140,7 @@ dependencies = [
  "node-semver",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 
@@ -1197,6 +1198,7 @@ dependencies = [
  "lockfile",
  "node-semver",
  "package",
+ "process",
  "resolver",
  "serde_json",
  "tarball",
