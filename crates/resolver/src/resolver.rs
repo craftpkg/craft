@@ -4,7 +4,7 @@ use contract::{Result, SpecError};
 use network::Network;
 use package::{DependencySpec, InstallPackage};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -64,8 +64,7 @@ impl Resolver {
         // Acquire the file-specific lock
         let _guard = file_lock.lock().await;
 
-        // Re-check if file exists after acquiring lock (another thread might have downloaded it)
-        if file_path.exists() {
+        if is_cached(&file_path, artifact).await {
             debug::info!(
                 "Package {} already downloaded at: {:?}",
                 artifact.name,
@@ -84,7 +83,11 @@ impl Resolver {
         }
 
         self.network
-            .download(&artifact.download_url, file_path.clone())
+            .download(
+                &artifact.download_url,
+                file_path.clone(),
+                artifact.integrity.as_ref(),
+            )
             .await
             .with_context(|| {
                 format!("failed to download {}@{}", artifact.name, artifact.version)
@@ -97,6 +100,23 @@ impl Resolver {
             path: file_path,
         })
     }
+}
+
+/// A cached tarball counts only if it still matches the artifact's integrity; a mismatching one
+/// is downloaded again and replaced.
+async fn is_cached(file_path: &Path, artifact: &ResolvedArtifact) -> bool {
+    let Some(integrity) = &artifact.integrity else {
+        return file_path.exists();
+    };
+    let Ok(bytes) = tokio::fs::read(file_path).await else {
+        return false;
+    };
+
+    let is_intact = integrity.verify(&bytes).is_ok();
+    if !is_intact {
+        debug::warning!("Cached {} does not match its integrity", artifact);
+    }
+    is_intact
 }
 
 #[cfg(test)]
