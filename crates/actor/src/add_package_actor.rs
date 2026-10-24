@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-
 use contract::{Actor, Context, Pipeline};
-use package::{InstallPackage, PackageJson};
+use package::{DependencySection, InstallPackage, ProjectManifest};
 use pipeline::{InstallPipe, LinkerPipe};
 use resolver::{Edge, ResolvedArtifact};
 
@@ -29,8 +27,7 @@ impl Actor<AddActorPayload> for AddPackageActor {
     }
 
     async fn run(&self) -> contract::Result<()> {
-        let package_json_path = self.context.package_json_path();
-        let mut package_json = PackageJson::from_file(&package_json_path).await?;
+        let mut manifest = ProjectManifest::open(&self.context.package_json_path()).await?;
 
         let packages = self
             .payload
@@ -41,15 +38,18 @@ impl Actor<AddActorPayload> for AddPackageActor {
         let graph = InstallPipe::new(&self.context, packages).run().await?;
         LinkerPipe::new(&self.context, graph.clone()).run().await?;
 
+        let section = if self.payload.is_dev {
+            DependencySection::DevDependencies
+        } else {
+            DependencySection::Dependencies
+        };
         for root in &graph.roots {
             let spec = saved_spec(root, &graph.target(root)?.artifact, self.payload.is_exact);
             debug::info!("Saving {}@{}", root.name, spec);
-            save_dependency(&mut package_json, &root.name, spec, self.payload.is_dev);
+            save_dependency(&mut manifest, section, &root.name, &spec);
         }
 
-        // Write updated package.json
-        let updated_content = serde_json::to_string_pretty(&package_json)?;
-        tokio::fs::write(&package_json_path, updated_content).await?;
+        manifest.save().await?;
         debug::info!("Updated package.json");
 
         Ok(())
@@ -73,27 +73,20 @@ fn saved_spec(root: &Edge, artifact: &ResolvedArtifact, is_exact: bool) -> Strin
     }
 }
 
-/// Saves into the requested section and drops the entry from the other one, so adding with or
-/// without `-D` moves an existing dependency rather than listing it twice.
-fn save_dependency(package_json: &mut PackageJson, name: &str, spec: String, is_dev: bool) {
-    let (section, other_section) = if is_dev {
-        (
-            &mut package_json.dev_dependencies,
-            &mut package_json.dependencies,
-        )
-    } else {
-        (
-            &mut package_json.dependencies,
-            &mut package_json.dev_dependencies,
-        )
-    };
-
-    if let Some(other_section) = other_section {
-        other_section.remove(name);
+/// Saves into `section` and drops the entry from every other one, so adding with or without
+/// `-D` moves an existing dependency rather than listing it twice.
+fn save_dependency(
+    manifest: &mut ProjectManifest,
+    section: DependencySection,
+    name: &str,
+    spec: &str,
+) {
+    for other_section in DependencySection::ALL {
+        if other_section != section {
+            manifest.remove_dependency(other_section, name);
+        }
     }
-    section
-        .get_or_insert_with(HashMap::new)
-        .insert(name.to_string(), spec);
+    manifest.set_dependency(section, name, spec);
 }
 
 #[cfg(test)]
@@ -144,18 +137,21 @@ mod tests {
 
     #[test]
     fn test_save_dependency_moves_between_sections() {
-        let mut package_json: PackageJson = serde_json::from_value(serde_json::json!({
-            "dependencies": { "ms": "^2.0.0", "zod": "^3.0.0" },
-        }))
-        .unwrap();
+        let content =
+            "{\n  \"dependencies\": {\n    \"ms\": \"^2.0.0\",\n    \"zod\": \"^3.0.0\"\n  }\n}\n";
+        let mut manifest = ProjectManifest::parse("package.json".as_ref(), content).unwrap();
 
-        save_dependency(&mut package_json, "ms", "^2.1.3".to_string(), true);
+        save_dependency(
+            &mut manifest,
+            DependencySection::DevDependencies,
+            "ms",
+            "^2.1.3",
+        );
 
-        let dependencies = package_json.dependencies.as_ref().unwrap();
-        let dev_dependencies = package_json.dev_dependencies.as_ref().unwrap();
-        assert!(!dependencies.contains_key("ms"));
-        assert_eq!(dependencies["zod"], "^3.0.0");
-        assert_eq!(dev_dependencies["ms"], "^2.1.3");
+        assert_eq!(
+            manifest.render().unwrap(),
+            "{\n  \"dependencies\": {\n    \"zod\": \"^3.0.0\"\n  },\n  \"devDependencies\": {\n    \"ms\": \"^2.1.3\"\n  }\n}\n"
+        );
     }
 
     fn artifact(name: &str, version: &str) -> ResolvedArtifact {
