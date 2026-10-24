@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use contract::{Pipeline, Result, get_package_cache_dir};
+use contract::{Context, Pipeline, Result};
 use futures::stream::{self, StreamExt};
 use package::InstallPackage;
 use resolver::{ResolvedArtifact, Resolver};
@@ -12,6 +13,7 @@ type LockedPackage = Arc<Mutex<HashMap<String, Arc<Mutex<Option<ResolvedArtifact
 
 pub struct InstallPipe {
     packages: Vec<InstallPackage>,
+    cache_dir: PathBuf,
     resolver: Resolver,
     // - None means resolution is in progress
     // - Some(artifact) means resolution is complete
@@ -21,10 +23,13 @@ pub struct InstallPipe {
 }
 
 impl InstallPipe {
-    pub fn new(packages: Vec<InstallPackage>) -> Self {
+    pub fn new(context: &Context, packages: Vec<InstallPackage>) -> Self {
+        let cache_dir = context.package_cache_dir();
+
         Self {
             packages,
-            resolver: Resolver::new(),
+            resolver: Resolver::new(cache_dir.clone()),
+            cache_dir,
             locked_packages: Arc::new(Mutex::new(HashMap::new())),
             unzip_locks: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -82,8 +87,9 @@ impl InstallPipe {
         };
         let _unzip_guard = unzip_lock.lock().await;
 
-        let unzip_dir =
-            get_package_cache_dir().join(format!("{}-{}", artifact.name, artifact.version));
+        let unzip_dir = self
+            .cache_dir
+            .join(format!("{}-{}", artifact.name, artifact.version));
 
         if !unzip_dir.exists() {
             unzip(download_artifact.path, unzip_dir).await?;
