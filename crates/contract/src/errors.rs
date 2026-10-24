@@ -19,6 +19,25 @@ pub enum PipelineError {
 }
 
 #[derive(Error, Debug)]
+pub enum NetworkError {
+    #[error("GET {url} returned HTTP {status}")]
+    Status { url: String, status: u16 },
+}
+
+#[derive(Error, Debug)]
+pub enum RegistryError {
+    #[error("package {name} not found in {registry}")]
+    PackageNotFound { name: String, registry: String },
+
+    #[error("{registry} denied access to {name} (HTTP {status}); check your registry credentials")]
+    AccessDenied {
+        name: String,
+        registry: String,
+        status: u16,
+    },
+}
+
+#[derive(Error, Debug)]
 pub enum ContextError {
     #[error("could not determine home directory; set CRAFT_HOME")]
     NoHomeDir,
