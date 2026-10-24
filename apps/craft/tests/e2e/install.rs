@@ -348,7 +348,7 @@ fn reports_a_missing_tarball_without_caching_the_error_body() {
         .stderr(contains("failed to download ms@2.1.3"))
         .stderr(contains("HTTP 404"));
 
-    assert!(!project.craft_home().join("packages/ms-2.1.3.tgz").exists());
+    assert!(project.store_entries().is_empty());
 }
 
 #[test]
@@ -365,21 +365,19 @@ fn rejects_tarballs_with_mismatched_integrity() {
         .stderr(contains("failed to download ms@2.1.3"))
         .stderr(contains("tarball integrity mismatch: expected sha512-AAAA"));
 
-    let packages = project.craft_home().join("packages");
-    let cached_entries = std::fs::read_dir(&packages).map_or(0, |entries| entries.count());
-    assert_eq!(cached_entries, 0);
+    assert!(project.store_entries().is_empty());
     assert!(!project.path().join("node_modules/ms").exists());
 }
 
 #[test]
-fn replaces_a_corrupted_cached_tarball() {
+fn restores_a_deleted_store_entry() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("ms", "2.1.3"));
     let first = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
     first.craft().arg("install").assert().success();
-    let packages = first.craft_home().join("packages");
-    std::fs::write(packages.join("ms-2.1.3.tgz"), b"corrupted").expect("corrupt tarball");
-    std::fs::remove_dir_all(packages.join("ms-2.1.3")).expect("remove extracted package");
+    for entry in first.store_entries() {
+        std::fs::remove_dir_all(first.store_dir().join(entry)).expect("remove store entry");
+    }
     let second = first.sibling(json!({ "dependencies": { "ms": "^2.0.0" } }));
 
     second.craft().arg("install").assert().success();
@@ -535,11 +533,11 @@ fn ignores_leftovers_of_an_interrupted_install() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("ms", "2.1.3"));
     let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
-    let packages = project.craft_home().join("packages");
-    let partial_extraction = packages.join("ms-2.1.3/.extract-a1b2c3");
+    let store = project.store_dir();
+    let partial_extraction = store.join(".extract-a1b2c3");
     std::fs::create_dir_all(&partial_extraction).expect("create partial extraction");
     std::fs::write(partial_extraction.join("package.json"), "{").expect("write partial file");
-    std::fs::write(packages.join(".tmpA1b2C3"), b"\x1f\x8b").expect("write partial download");
+    std::fs::write(store.join(".tmpA1b2C3"), b"\x1f\x8b").expect("write partial download");
 
     project.craft().arg("install").assert().success();
 
@@ -547,12 +545,11 @@ fn ignores_leftovers_of_an_interrupted_install() {
 }
 
 #[test]
-fn reuses_extracted_packages_without_downloading_again() {
+fn reuses_store_entries_without_downloading_again() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("ms", "2.1.3"));
     let first = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
     first.craft().arg("install").assert().success();
-    std::fs::remove_file(first.craft_home().join("packages/ms-2.1.3.tgz")).expect("remove tarball");
     let second = first.sibling(json!({ "dependencies": { "ms": "^2.0.0" } }));
 
     second.craft().arg("install").assert().success();
@@ -564,6 +561,35 @@ fn reuses_extracted_packages_without_downloading_again() {
         .count();
     assert_eq!(tarball_requests, 1);
     assert_eq!(second.required_version("ms"), Ok("2.1.3".to_string()));
+}
+
+#[test]
+fn keeps_extracted_packages_but_not_tarballs_in_the_store() {
+    let registry = MockRegistry::start();
+    registry
+        .publish(PackageFixture::new("ms", "2.1.3"))
+        .publish(PackageFixture::new("@types/node", "22.20.5").root_dir("node"));
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "ms": "^2.0.0", "@types/node": "^22.0.0" } }),
+    );
+
+    project.craft().arg("install").assert().success();
+
+    let entries = project.store_entries();
+    assert_eq!(entries.len(), 2, "{entries:?}");
+    assert!(
+        entries[0].starts_with("@types+node@22.20.5-"),
+        "{entries:?}"
+    );
+    assert!(entries[1].starts_with("ms@2.1.3-"), "{entries:?}");
+    assert!(
+        project
+            .store_dir()
+            .join(&entries[1])
+            .join("package.json")
+            .exists()
+    );
 }
 
 #[test]
