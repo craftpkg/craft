@@ -220,3 +220,90 @@ fn passes_arguments_verbatim() {
         .success()
         .stdout("a; echo INJECTED\n");
 }
+
+#[test]
+fn exec_runs_dependency_bins_but_not_scripts() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("cowsay", "1.6.0").bin("cowsay", "cli.js"));
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "cowsay": "^1.0.0" }, "scripts": { "build": "echo build" } }),
+    );
+    project.craft().arg("install").assert().success();
+
+    project
+        .craft()
+        .args(["exec", "cowsay"])
+        .assert()
+        .success()
+        .stdout(contains("cowsay cowsay@1.6.0"));
+    project
+        .craft()
+        .args(["exec", "build"])
+        .assert()
+        .failure()
+        .stderr(contains("no build in node_modules/.bin"));
+}
+
+#[test]
+fn dlx_runs_a_package_without_adding_it() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("cowsay", "1.6.0").bin("cowsay", "cli.js"));
+    let project = Project::new(&registry, json!({ "name": "app" }));
+
+    project
+        .craft()
+        .args(["dlx", "cowsay"])
+        .assert()
+        .success()
+        .stdout(contains("cowsay cowsay@1.6.0"));
+
+    assert!(project.package_json().get("dependencies").is_none());
+    assert!(!project.path().join("node_modules").exists());
+
+    registry.publish(PackageFixture::new("cowsay", "1.7.0").bin("cowsay", "cli.js"));
+    project
+        .craft()
+        .args(["x", "cowsay"])
+        .assert()
+        .success()
+        .stdout(contains("cowsay cowsay@1.7.0"));
+    project
+        .craft()
+        .args(["dlx", "cowsay@1.6.0"])
+        .assert()
+        .success()
+        .stdout(contains("cowsay cowsay@1.6.0"));
+}
+
+#[test]
+fn dlx_runs_a_named_bin_and_passes_its_exit_code() {
+    let registry = MockRegistry::start();
+    registry.publish(
+        PackageFixture::new("toolbox", "1.0.0")
+            .bin("tool-a", "a.js")
+            .file("b.js", "#!/usr/bin/env node\nprocess.exit(3);\n")
+            .manifest_field("bin", json!({ "tool-a": "a.js", "tool-b": "b.js" })),
+    );
+    let project = Project::new(&registry, json!({}));
+
+    project
+        .craft()
+        .args(["dlx", "-p", "toolbox", "tool-a"])
+        .assert()
+        .success()
+        .stdout(contains("tool-a toolbox@1.0.0"));
+    project
+        .craft()
+        .args(["dlx", "-p", "toolbox", "tool-b"])
+        .assert()
+        .code(3);
+    project
+        .craft()
+        .args(["dlx", "toolbox"])
+        .assert()
+        .failure()
+        .stderr(contains(
+            "toolbox has no bin named toolbox; it provides: tool-a, tool-b",
+        ));
+}
