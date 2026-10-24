@@ -12,6 +12,7 @@ debug = { path = "../debug" }
 anyhow = "1.0"
 node-semver = "2.0"
 fsutil = { path = "../fsutil" }
+lockfile = { path = "../lockfile" }
 tarball = { path = "../tarball" }
 sha2 = "0.10"
 tempfile = "3.10"
