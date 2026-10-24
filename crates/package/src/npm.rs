@@ -33,7 +33,46 @@ pub enum PackageBin {
     Map(HashMap<String, String>),
 }
 
+/// A `peerDependencies` entry, optional when `peerDependenciesMeta` marks it so.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PeerSpec {
+    pub name: String,
+    pub range: String,
+    pub optional: bool,
+}
+
 impl PackageJson {
+    /// Declared peers, sorted by name. Read loosely from the raw manifest, since registries
+    /// serve these fields as-is.
+    pub fn peer_dependencies(&self) -> Vec<PeerSpec> {
+        let Some(peers) = self
+            .other
+            .get("peerDependencies")
+            .and_then(serde_json::Value::as_object)
+        else {
+            return Vec::new();
+        };
+        let meta = self.other.get("peerDependenciesMeta");
+
+        let mut specs: Vec<PeerSpec> = peers
+            .iter()
+            .filter_map(|(name, range)| {
+                let optional = meta
+                    .and_then(|meta| meta.get(name))
+                    .and_then(|entry| entry.get("optional"))
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                Some(PeerSpec {
+                    name: name.clone(),
+                    range: range.as_str()?.to_string(),
+                    optional,
+                })
+            })
+            .collect();
+        specs.sort_by(|a, b| a.name.cmp(&b.name));
+        specs
+    }
+
     pub async fn from_file(package_json_path: &Path) -> Result<Self> {
         if !package_json_path.exists() {
             return Err(PackageError::NoPackageJson.into());
@@ -66,6 +105,33 @@ pub struct NpmPackage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_reads_peer_dependencies_and_optional_meta() {
+        let manifest: PackageJson = serde_json::from_str(
+            r#"{
+                "peerDependencies": { "react": "^18 || ^19", "react-native": "*", "bad": 1 },
+                "peerDependenciesMeta": { "react-native": { "optional": true } }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            manifest.peer_dependencies(),
+            [
+                PeerSpec {
+                    name: "react".to_string(),
+                    range: "^18 || ^19".to_string(),
+                    optional: false,
+                },
+                PeerSpec {
+                    name: "react-native".to_string(),
+                    range: "*".to_string(),
+                    optional: true,
+                },
+            ]
+        );
+    }
 
     #[test]
     fn test_tolerates_loosely_typed_metadata_fields() {
