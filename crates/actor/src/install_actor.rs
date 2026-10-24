@@ -8,6 +8,7 @@ use pipeline::{InstallPipe, LinkerPipe};
 use crate::lock_state::{
     is_up_to_date, lock_differences, mark_installed, save_lockfile, with_lock_preference,
 };
+use crate::scripts::{run_install_scripts, script_policy};
 
 pub struct InstallActor {
     context: Context,
@@ -20,6 +21,8 @@ pub struct InstallOptions {
     pub frozen_lockfile: bool,
     /// Start from an empty `node_modules`, as `craft ci` does.
     pub clean: bool,
+    /// Run no lifecycle scripts at all, the project's own included.
+    pub ignore_scripts: bool,
 }
 
 impl Actor<InstallOptions> for InstallActor {
@@ -33,11 +36,12 @@ impl Actor<InstallOptions> for InstallActor {
         }
         let package_json = PackageJson::from_file(&self.context.package_json_path()).await?;
         let lockfile = Lockfile::load(&self.context.cwd).await?;
+        let policy = script_policy(&package_json, self.options.ignore_scripts);
         let is_frozen = self.options.frozen_lockfile || self.context.ci;
         if is_frozen {
             ensure_lockfile_matches(lockfile.as_ref(), &package_json)?;
         }
-        if is_up_to_date(&self.context, lockfile.as_ref(), &package_json).await {
+        if is_up_to_date(&self.context, lockfile.as_ref(), &package_json, &policy).await {
             println!("Already up to date");
             return Ok(());
         }
@@ -54,10 +58,14 @@ impl Actor<InstallOptions> for InstallActor {
         }
         let graph = pipe.run().await?;
         LinkerPipe::new(&self.context, graph.clone()).run().await?;
+        run_install_scripts(&self.context, graph.clone(), &package_json, &policy, true).await?;
 
         match lockfile.filter(|_| is_frozen) {
-            Some(lockfile) => mark_installed(&self.context, &lockfile).await,
-            None => save_lockfile(&self.context, &graph, &manifest_specifiers(&package_json)).await,
+            Some(lockfile) => mark_installed(&self.context, &lockfile, &policy).await,
+            None => {
+                let specifiers = manifest_specifiers(&package_json);
+                save_lockfile(&self.context, &graph, &specifiers, &policy).await
+            }
         }
     }
 }
