@@ -101,6 +101,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_npm_package() {
         let pkg = InstallPackage::new("react".to_string(), Some("17.0.2".to_string()), false);
         let resolver = Resolver::new(std::env::temp_dir());
@@ -125,6 +126,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_npm_latest() {
         let pkg = InstallPackage::new("express".to_string(), None, false);
         let resolver = Resolver::new(std::env::temp_dir());
