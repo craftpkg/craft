@@ -2,6 +2,7 @@ use std::path::Path;
 
 use contract::{Actor, Context, Result};
 use package::{DependencySection, ProjectManifest};
+use pipeline::prune_node_modules;
 use tokio::fs;
 
 #[derive(Debug)]
@@ -34,6 +35,7 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
                 debug::warning!("Package {} not found in node_modules", package_name);
             }
         }
+        prune_node_modules(&node_modules, None).await?;
 
         let package_json_path = self.context.package_json_path();
         if !package_json_path.exists() {
