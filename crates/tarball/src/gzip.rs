@@ -3,6 +3,7 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 
+use anyhow::Context as _;
 use contract::TarballError;
 use flate2::read::GzDecoder;
 use tar::{Archive, EntryType};
@@ -16,7 +17,14 @@ const EXECUTE_BITS: u32 = 0o111;
 /// `dest` appears only once fully extracted; if another process extracts it first, theirs is kept.
 pub async fn unzip(source: PathBuf, dest: PathBuf) -> contract::Result<()> {
     let _permit = extraction_permits().acquire().await?;
-    tokio::task::spawn_blocking(move || extract_atomically(&source, &dest)).await?
+    let description = format!(
+        "could not extract {} into {}",
+        source.display(),
+        dest.display()
+    );
+    tokio::task::spawn_blocking(move || extract_atomically(&source, &dest))
+        .await?
+        .context(description)
 }
 
 /// Extraction is CPU-bound, so more of it at once than there are cores only adds contention.
@@ -205,9 +213,10 @@ mod tests {
         let error = unzip(source, dest).await.unwrap_err();
 
         assert_eq!(
-            error.to_string(),
+            error.root_cause().to_string(),
             "tarball entry escapes the package directory: package/../../evil.js"
         );
+        assert!(error.to_string().starts_with("could not extract "));
         assert!(!dir.path().join("evil.js").exists());
     }
 
