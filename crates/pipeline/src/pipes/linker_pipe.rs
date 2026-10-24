@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use contract::{Pipeline, Result, get_package_cache_dir};
+use contract::{Context, Pipeline, Result};
 use futures::stream::{self, StreamExt};
 use node_semver::{Range, Version};
 use package::{InstallPackage, PackageBin};
@@ -9,16 +10,28 @@ use resolver::ResolvedArtifact;
 use tokio::fs;
 
 pub struct LinkerPipe {
+    context: Context,
     artifacts: Vec<ResolvedArtifact>,
     root_packages: Vec<InstallPackage>,
 }
 
 impl LinkerPipe {
-    pub fn new(artifacts: Vec<ResolvedArtifact>, root_packages: Vec<InstallPackage>) -> Self {
+    pub fn new(
+        context: &Context,
+        artifacts: Vec<ResolvedArtifact>,
+        root_packages: Vec<InstallPackage>,
+    ) -> Self {
         Self {
+            context: context.clone(),
             artifacts,
             root_packages,
         }
+    }
+
+    fn package_dir(&self, artifact: &ResolvedArtifact) -> PathBuf {
+        self.context
+            .package_cache_dir()
+            .join(format!("{}-{}/package", artifact.name, artifact.version))
     }
 
     /// Links dependencies of an artifact into its cached node_modules
@@ -29,8 +42,7 @@ impl LinkerPipe {
     ) -> Result<()> {
         debug::info!("Hydrating package: {}", artifact.name);
 
-        let source_dir =
-            get_package_cache_dir().join(format!("{}-{}/package", artifact.name, artifact.version));
+        let source_dir = self.package_dir(artifact);
 
         // Link dependencies into the artifact's node_modules
         if let Some(deps) = artifact
@@ -64,10 +76,7 @@ impl LinkerPipe {
                         });
 
                     if let Some(dep_artifact) = best_match {
-                        let dep_source_dir = get_package_cache_dir().join(format!(
-                            "{}-{}/package",
-                            dep_artifact.name, dep_artifact.version
-                        ));
+                        let dep_source_dir = self.package_dir(dep_artifact);
                         let dep_dest_path = artifact_node_modules.join(dep_name);
 
                         // Create parent dirs for scoped packages
@@ -159,12 +168,10 @@ impl LinkerPipe {
         };
 
         // Source path in global cache
-        let source_dir =
-            get_package_cache_dir().join(format!("{}-{}/package", artifact.name, artifact.version));
+        let source_dir = self.package_dir(artifact);
 
         // Destination path in node_modules
-        let cwd = std::env::current_dir()?;
-        let node_modules = cwd.join("node_modules");
+        let node_modules = self.context.node_modules_dir();
         let dest_path = node_modules.join(&artifact.name);
 
         // Create node_modules and parent dirs (for scoped packages)
@@ -269,8 +276,7 @@ impl LinkerPipe {
 impl Pipeline<()> for LinkerPipe {
     async fn run(&self) -> Result<()> {
         // Ensure node_modules exists
-        let cwd = std::env::current_dir()?;
-        let node_modules = cwd.join("node_modules");
+        let node_modules = self.context.node_modules_dir();
         fs::create_dir_all(&node_modules).await?;
 
         // Index artifacts by name for dependency resolution
@@ -321,7 +327,6 @@ impl Pipeline<()> for LinkerPipe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
@@ -330,15 +335,14 @@ mod tests {
     async fn test_link_binaries() -> Result<()> {
         let temp_home = tempdir()?;
         let temp_cwd = tempdir()?;
-
-        // Mock HOME
-        unsafe {
-            env::set_var("HOME", temp_home.path());
-        }
-        env::set_current_dir(&temp_cwd)?;
+        let context = Context::new(
+            temp_cwd.path().to_path_buf(),
+            temp_home.path().to_path_buf(),
+            false,
+        );
 
         // Setup cache
-        let cache_dir = temp_home.path().join(".craft").join("packages");
+        let cache_dir = context.package_cache_dir();
         let pkg_name = "test-pkg";
         let pkg_version = "1.0.0";
         let pkg_dir = cache_dir.join(format!("{}-{}/package", pkg_name, pkg_version));
@@ -376,7 +380,7 @@ mod tests {
         let root_pkg =
             InstallPackage::new(pkg_name.to_string(), Some(pkg_version.to_string()), false);
 
-        let pipe = LinkerPipe::new(vec![artifact], vec![root_pkg]);
+        let pipe = LinkerPipe::new(&context, vec![artifact], vec![root_pkg]);
         pipe.run().await?;
 
         // Verify
@@ -395,15 +399,7 @@ mod tests {
             .join(pkg_name)
             .join("cli.js");
 
-        // Handle /var vs /private/var on macOS
-        let target_str = target.to_string_lossy();
-        let expected_str = expected_target.to_string_lossy();
-
-        if target_str.starts_with("/private/var") && expected_str.starts_with("/var") {
-            assert_eq!(target_str, format!("/private{}", expected_str));
-        } else {
-            assert_eq!(target, expected_target);
-        }
+        assert_eq!(target, expected_target);
 
         Ok(())
     }
