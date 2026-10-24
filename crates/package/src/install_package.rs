@@ -12,6 +12,9 @@ pub struct InstallPackage {
     /// The directory relative `file:` and `link:` specs resolve against; the project directory
     /// when `None`.
     pub base_dir: Option<PathBuf>,
+    /// Whether a version from craft.lock may answer this request. Off for packages the user
+    /// just asked for and for project dependencies whose specifier changed.
+    pub prefer_locked: bool,
 }
 
 impl InstallPackage {
@@ -21,7 +24,13 @@ impl InstallPackage {
             version,
             is_dev,
             base_dir: None,
+            prefer_locked: true,
         }
+    }
+
+    pub fn without_lock(mut self) -> Self {
+        self.prefer_locked = false;
+        self
     }
 
     pub fn with_base_dir(mut self, base_dir: PathBuf) -> Self {
