@@ -1,7 +1,7 @@
-use crate::{GitResolver, NpmResolver, ResolvedArtifact, download_artifact::DownloadArtifact};
-use contract::Result;
+use crate::{NpmResolver, ResolvedArtifact, download_artifact::DownloadArtifact};
+use contract::{Result, SpecError};
 use network::Network;
-use package::InstallPackage;
+use package::{DependencySpec, InstallPackage};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,7 +10,6 @@ use tokio::sync::Mutex;
 #[derive(Debug)]
 pub struct Resolver {
     npm_resolver: NpmResolver,
-    git_resolver: GitResolver,
     network: Network,
     cache_dir: PathBuf,
     // File-level locks to prevent concurrent downloads to the same file
@@ -21,7 +20,6 @@ impl Resolver {
     pub fn new(cache_dir: PathBuf, registry: String) -> Self {
         Self {
             npm_resolver: NpmResolver::new(registry),
-            git_resolver: GitResolver::new(),
             network: Network::new(),
             cache_dir,
             download_locks: Arc::new(Mutex::new(HashMap::new())),
@@ -29,17 +27,22 @@ impl Resolver {
     }
 
     pub async fn resolve(&self, package: &InstallPackage) -> Result<ResolvedArtifact> {
-        if package.is_git() {
-            debug::info!("Resolving git package: {}", package.name);
-            self.git_resolver.resolve(package)
-        } else {
-            debug::info!(
-                "Resolving npm package: {} {}",
-                package.name,
-                package.version.clone().unwrap_or("".to_string()),
-            );
-            self.npm_resolver.resolve(package).await
-        }
+        let spec = DependencySpec::parse(&package.name, package.version.as_deref())?;
+
+        let Some((name, requirement)) = spec.registry_target() else {
+            let dependency = match &package.version {
+                Some(version) => format!("{}@{}", package.name, version),
+                None => package.name.clone(),
+            };
+            return Err(SpecError::Unsupported {
+                kind: spec.kind(),
+                dependency,
+            }
+            .into());
+        };
+
+        debug::info!("Resolving npm package: {name}@{requirement}");
+        self.npm_resolver.resolve(name, requirement).await
     }
 
     pub async fn download(
@@ -102,28 +105,63 @@ mod tests {
     use contract::DEFAULT_REGISTRY;
 
     #[tokio::test]
+    async fn test_unsupported_specs_are_reported() {
+        let resolver = Resolver::new(std::env::temp_dir(), DEFAULT_REGISTRY.to_string());
+        let cases = [
+            (
+                "repo",
+                Some("github:user/repo"),
+                "git dependencies are not supported yet: repo@github:user/repo",
+            ),
+            (
+                "local",
+                Some("file:../local"),
+                "file: dependencies are not supported yet: local@file:../local",
+            ),
+            (
+                "git+https://github.com/user/repo.git",
+                None,
+                "git dependencies are not supported yet: git+https://github.com/user/repo.git",
+            ),
+        ];
+
+        for (name, spec, message) in cases {
+            let pkg = InstallPackage::new(name.to_string(), spec.map(str::to_string), false);
+            let error = resolver.resolve(&pkg).await.unwrap_err();
+            assert_eq!(error.to_string(), message);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_invalid_spec_is_reported() {
+        let resolver = Resolver::new(std::env::temp_dir(), DEFAULT_REGISTRY.to_string());
+        let pkg = InstallPackage::new(
+            "react".to_string(),
+            Some("not a version".to_string()),
+            false,
+        );
+
+        let error = resolver.resolve(&pkg).await.unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid dependency spec: react@not a version"
+        );
+    }
+
+    #[tokio::test]
     #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_npm_package() {
         let pkg = InstallPackage::new("react".to_string(), Some("17.0.2".to_string()), false);
         let resolver = Resolver::new(std::env::temp_dir(), DEFAULT_REGISTRY.to_string());
-        let result = resolver.resolve(&pkg).await;
 
-        assert!(result.is_ok());
-        let artifact = result.expect("Failed to resolve npm package");
+        let artifact = resolver
+            .resolve(&pkg)
+            .await
+            .expect("Failed to resolve npm package");
+
         assert_eq!(artifact.name, "react");
         assert_eq!(artifact.version, "17.0.2");
-    }
-
-    #[tokio::test]
-    async fn test_resolve_git_package() {
-        let pkg = InstallPackage::new("git:github.com/user/repo.git".to_string(), None, false);
-        let resolver = Resolver::new(std::env::temp_dir(), DEFAULT_REGISTRY.to_string());
-        let result = resolver.resolve(&pkg).await;
-
-        assert!(result.is_ok());
-        let artifact = result.expect("Failed to resolve git package");
-        assert_eq!(artifact.name, "repo");
-        assert_eq!(artifact.version, "git");
     }
 
     #[tokio::test]
@@ -131,22 +169,32 @@ mod tests {
     async fn test_resolve_npm_latest() {
         let pkg = InstallPackage::new("express".to_string(), None, false);
         let resolver = Resolver::new(std::env::temp_dir(), DEFAULT_REGISTRY.to_string());
-        let result = resolver.resolve(&pkg).await;
 
-        assert!(result.is_ok());
-        let artifact = result.expect("Failed to resolve express package");
+        let artifact = resolver
+            .resolve(&pkg)
+            .await
+            .expect("Failed to resolve express package");
+
         assert_eq!(artifact.name, "express");
         assert!(!artifact.version.is_empty());
     }
 
     #[tokio::test]
-    async fn test_resolve_gitlab_package() {
-        let pkg = InstallPackage::new("git:gitlab.com/package/psc".to_string(), None, false);
+    #[ignore = "requires network access to registry.npmjs.org"]
+    async fn test_resolve_npm_alias() {
+        let pkg = InstallPackage::new(
+            "wrap-ansi-cjs".to_string(),
+            Some("npm:wrap-ansi@^7.0.0".to_string()),
+            false,
+        );
         let resolver = Resolver::new(std::env::temp_dir(), DEFAULT_REGISTRY.to_string());
-        let result = resolver.resolve(&pkg).await;
 
-        assert!(result.is_ok());
-        let artifact = result.expect("Failed to resolve gitlab package");
-        assert_eq!(artifact.name, "psc");
+        let artifact = resolver
+            .resolve(&pkg)
+            .await
+            .expect("Failed to resolve npm alias");
+
+        assert_eq!(artifact.name, "wrap-ansi");
+        assert!(artifact.version.starts_with("7."));
     }
 }
