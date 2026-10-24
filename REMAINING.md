@@ -68,9 +68,9 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 4.2 | `os` / `cpu` / `libc` filtering | P0 | [x] |
 | 4.3 | Lifecycle scripts with an allowlist | P0 | [x] |
 | **Phase 5 — Network & performance** | | | |
-| 5.1 | Abbreviated packuments | P2 | [ ] |
+| 5.1 | Abbreviated packuments | P2 | [-] deferred |
 | 5.2 | Memoize packument fetches per package name | P2 | [x] |
-| 5.3 | Global concurrency limits | P2 | [ ] |
+| 5.3 | Global concurrency limits | P2 | [x] |
 | 5.4 | Timeouts, retries, User-Agent | P2 | [x] |
 | 5.5 | Streaming downloads (hash while writing) | P2 | [ ] |
 | 5.6 | Metadata disk cache (ETag / 304) | P2 | [ ] |
@@ -630,7 +630,9 @@ README says "`package-lock.json` support (coming soon)" — decide whether that 
 
 Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm ≈ 3.3 s.
 
-### 5.1 Abbreviated packuments · P2
+### 5.1 Abbreviated packuments · P2 — ⏸ deferred
+
+> Deferred after measuring: the registry's abbreviated ("corgi") manifests drop `libc` (so `@rollup/rollup-linux-x64-musl` and `-gnu` become indistinguishable on Linux, breaking 4.2) and `scripts` (only `hasInstallScript` remains), and with gzip from 5.4 the saving is small — `typescript` 2.02 MB full vs 1.70 MB abbreviated compressed, `@types/node` 1.43 vs 1.11 MB. Revisit with a fallback to the full manifest for packages whose `os` includes `linux`. Meanwhile install scripts are read from the installed package's own package.json, which also covers registries that serve abbreviated metadata.
 
 - Send `Accept: application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8` (`network.rs:22`). `typescript` packument: 15.8 MB full vs 8.7 MB abbreviated. Abbreviated manifests still include `bin`, `dist.integrity`, `optionalDependencies`, `os`/`cpu`, `hasInstallScript`.
 - `NpmPackage` needs `#[serde(default)]` on optional fields; make manifest fields tolerant (old packages have `keywords` as a string, `dependencies` as an array, etc.) — use `serde_json::Value` or lenient deserializers for fields that aren't needed, so one bad historical version doesn't fail the whole packument.
@@ -641,7 +643,9 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 
 - Today every `(name, range)` pair fetches the full packument again (`npm.rs:23`) — measured: 415 packument requests for a 218-package tree (`debug` ×11, `@babel/types` ×11). Cache `Arc<Packument>` per name in a `DashMap<String, OnceCell<…>>` (or `futures::Shared`) so concurrent requests for the same name share one fetch.
 
-### 5.3 Global concurrency limits · P2
+### 5.3 Global concurrency limits · P2 — ✔ done
+
+> Done: each `Network` client (one for metadata, one for tarballs) holds a semaphore of `network-concurrency` permits (pnpm's `.npmrc` key, default 16) for the whole request including its body, so the nested `buffer_unordered` of resolution can no longer open connections without bound; retries wait outside the permit. Tarball extraction is capped at the number of CPU cores. Verified with 30 dependencies at `network-concurrency=2`: at most 4 requests in flight. Vite/React project without a lockfile: 3.1–7.0 s; fresh store with a lockfile: 2.0 s.
 
 - `buffer_unordered(10)` nests at every recursion level (`install_pipe.rs:106`) → effectively unbounded parallel requests. Replace with a `tokio::sync::Semaphore` for metadata (e.g. 64) and one for tarballs (e.g. 16), configurable via `network-concurrency`.
 - Also cap blocking extraction tasks.
