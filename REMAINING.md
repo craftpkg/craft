@@ -71,7 +71,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 5.1 | Abbreviated packuments | P2 | [ ] |
 | 5.2 | Memoize packument fetches per package name | P2 | [x] |
 | 5.3 | Global concurrency limits | P2 | [ ] |
-| 5.4 | Timeouts, retries, User-Agent | P2 | [ ] |
+| 5.4 | Timeouts, retries, User-Agent | P2 | [x] |
 | 5.5 | Streaming downloads (hash while writing) | P2 | [ ] |
 | 5.6 | Metadata disk cache (ETag / 304) | P2 | [ ] |
 | 5.7 | Registry configuration (`.npmrc`, scopes, auth) | P1 | [x] |
@@ -646,7 +646,9 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 - `buffer_unordered(10)` nests at every recursion level (`install_pipe.rs:106`) → effectively unbounded parallel requests. Replace with a `tokio::sync::Semaphore` for metadata (e.g. 64) and one for tarballs (e.g. 16), configurable via `network-concurrency`.
 - Also cap blocking extraction tasks.
 
-### 5.4 Timeouts, retries, User-Agent · P2
+### 5.4 Timeouts, retries, User-Agent · P2 — ✔ done
+
+> Done: reqwest 0.11 → 0.12 with `gzip` + `brotli`, a 10 s connect timeout and a 60 s read (stall) timeout rather than a whole-request cap, and `User-Agent: craft/<version> <os> <arch>` (`contract::user_agent`, shared with scripts' `npm_config_user_agent`). Every GET — packuments and tarballs, body included — is retried on connection errors, timeouts, interrupted bodies and 408/429/500/502/503/504, `fetch-retries` times (npm's `.npmrc` key, default 2), with exponential backoff from 500 ms plus jitter, or the server's `Retry-After` (capped at 30 s); 404 and auth errors fail at once. Measured on the Vite/React project without a lockfile: 4.4–8.4 s (was 8.3–16.8 s), mostly from compressed packuments. Not done: `rustls-tls` (still native TLS).
 
 - `reqwest::Client::builder()` with connect + read timeouts, gzip/brotli, HTTP/2, `User-Agent: craft/<version> <os> <arch>`.
 - Retry idempotent requests on connect errors / 429 / 5xx with exponential backoff + jitter (3 attempts), honouring `Retry-After`.
