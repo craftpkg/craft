@@ -1,18 +1,22 @@
 use std::fmt::Display;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand};
 use contract::CRAFT_VERSION;
 
 #[derive(Parser, Debug)]
-#[command(name = "craft", version = CRAFT_VERSION)]
+#[command(name = "craft", version = CRAFT_VERSION, disable_version_flag = true)]
 #[command(about = "A fast, strict package manager for Node.js", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
-    /// Print what craft is doing.
-    #[arg(short, long, global = true, conflicts_with = "silent")]
-    pub verbose: bool,
+    /// Print the version.
+    #[arg(short = 'v', short_alias = 'V', long, action = ArgAction::Version)]
+    pub version: (),
+
+    /// Print debug logs of what craft is doing.
+    #[arg(long, global = true, conflicts_with = "silent")]
+    pub debug: bool,
 
     /// Print nothing but warnings and errors.
     #[arg(short, long, global = true)]
