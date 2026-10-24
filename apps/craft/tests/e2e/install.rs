@@ -422,31 +422,6 @@ fn replaces_a_dangling_bin_directory() {
 }
 
 #[test]
-#[ignore = "fixed by 1.13: file: dependencies are reported as unsupported"]
-fn installs_file_dependencies() {
-    let registry = MockRegistry::start();
-    let project = Project::new(
-        &registry,
-        json!({ "dependencies": { "local-lib": "file:./libs/local-lib" } }),
-    );
-    project.write_file(
-        "libs/local-lib/package.json",
-        r#"{ "name": "local-lib", "version": "0.1.0" }"#,
-    );
-    project.write_file(
-        "libs/local-lib/index.js",
-        r#"module.exports = { name: "local-lib", version: "0.1.0" };"#,
-    );
-
-    project.craft().arg("install").assert().success();
-
-    assert_eq!(
-        project.required_version("local-lib"),
-        Ok("0.1.0".to_string())
-    );
-}
-
-#[test]
 #[ignore = "fixed by 1.14: a string bin on a scoped package is linked as .bin/@scope/name"]
 fn links_string_bins_of_scoped_packages() {
     let registry = MockRegistry::start();
