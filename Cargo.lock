@@ -274,7 +274,6 @@ dependencies = [
 name = "debug"
 version = "0.1.0"
 dependencies = [
- "contract",
  "tracing",
  "tracing-subscriber",
 ]
@@ -811,6 +810,7 @@ dependencies = [
  "contract",
  "debug",
  "package",
+ "tempfile",
  "tokio",
 ]
 
