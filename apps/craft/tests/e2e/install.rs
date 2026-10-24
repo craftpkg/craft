@@ -653,6 +653,52 @@ fn concurrent_installs_sharing_a_craft_home_succeed() {
 }
 
 #[test]
+fn concurrent_installs_into_an_empty_shared_store_succeed() {
+    let registry = MockRegistry::start();
+    let mut dependencies = serde_json::Map::new();
+    for index in 0..40 {
+        let name = format!("pkg-{index}");
+        registry.publish(PackageFixture::new(&name, "1.0.0"));
+        dependencies.insert(name, json!("^1.0.0"));
+    }
+    let package_json = json!({ "dependencies": dependencies });
+
+    for _ in 0..2 {
+        let first = Project::new(&registry, package_json.clone());
+        let projects: Vec<Project> = (0..8)
+            .map(|_| first.sibling(package_json.clone()))
+            .collect();
+        let children: Vec<_> = projects
+            .iter()
+            .map(|project| {
+                project
+                    .craft_process()
+                    .arg("install")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .expect("spawn craft install")
+            })
+            .collect();
+
+        for child in children {
+            let output = child.wait_with_output().expect("craft install exits");
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let leftover_tarballs = first
+            .store_entries()
+            .into_iter()
+            .filter(|entry| entry.ends_with(".tgz"))
+            .count();
+        assert_eq!(leftover_tarballs, 0);
+    }
+}
+
+#[test]
 fn installs_optional_dependencies_matching_the_host_platform() {
     let host = format!("{}-{}", node_platform(), node_arch());
     let registry = MockRegistry::start();
