@@ -248,6 +248,7 @@ mod tests {
                         tarball_url: String::new(),
                     },
                     integrity: None,
+                    platform: Default::default(),
                     package: None,
                 },
                 dependencies: dependencies.iter().map(|target| edge(target)).collect(),
