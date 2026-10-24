@@ -43,7 +43,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 1.3 | npm alias linking (root + transitive) | P0 | [x] |
 | 1.4 | Tarball root-directory stripping | P0 | [x] |
 | 1.5 | HTTP status checks + friendly registry errors | P0 | [x] |
-| 1.6 | Atomic download and extraction | P0 | [ ] |
+| 1.6 | Atomic download and extraction | P0 | [x] |
 | 1.7 | Integrity verification (`dist.integrity` / `shasum`) | P0 | [ ] |
 | 1.8 | Symlink-safe filesystem helpers (dangling links) | P0 | [ ] |
 | 1.9 | `craft add` fixes | P1 | [ ] |
@@ -280,7 +280,9 @@ Caused by: missing field `name` at line 1 column 21
 - `response.error_for_status()`; map 404 → `PipelineError::PackageNotFound { name }`, 401/403 → auth error hint, 429/5xx → retryable (5.4).
 - Error messages name the package and the spec that requested it, plus the parent chain if transitive (`express > body-parser > foo`).
 
-### 1.6 Atomic download and extraction · P0 📖
+### 1.6 Atomic download and extraction · P0 📖 — ✔ done
+
+> Done: `Network::download` writes to a `NamedTempFile` beside the target and renames it into place; `tarball::gzip::unzip` extracts into a `.extract-*` staging dir beside `package/` and renames it, keeping the other copy if another process got there first. A failed extraction removes its staging dir. `InstallPipe::fetch` checks for the extracted package before downloading, so a missing `.tgz` no longer triggers a re-download. Verified by `kill -9` at several points of a 71-package real-registry install (2–69 packages extracted): every re-run succeeded. Not done: a completion marker — dirs half-extracted by craft builds older than this are still trusted (`craft cache clean` clears them). Concurrent installs still race while linking into the shared cache (1.8 / 2.2), integrity before rename is 1.7.
 
 **Problem**
 - `Resolver::download` treats `file_path.exists()` as "cached" (`crates/resolver/src/resolver.rs:67`). `Network::download` creates the final file then writes into it — a killed process leaves a truncated `.tgz` that is reused forever.
