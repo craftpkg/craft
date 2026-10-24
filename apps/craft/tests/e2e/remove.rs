@@ -114,3 +114,34 @@ fn symlink_dir(target: &str, link: &std::path::Path) {
 fn symlink_dir(target: &str, link: &std::path::Path) {
     std::os::windows::fs::symlink_dir(target, link).expect("create dangling symlink");
 }
+
+#[test]
+fn removes_optional_and_peer_dependencies() {
+    let registry = MockRegistry::start();
+    registry
+        .publish(PackageFixture::new("ms", "2.1.3"))
+        .publish(PackageFixture::new("react", "19.2.0"));
+    let project = Project::new(
+        &registry,
+        json!({
+            "name": "lib",
+            "optionalDependencies": { "ms": "^2.0.0" },
+            "peerDependencies": { "react": "^19.0.0" },
+            "devDependencies": { "react": "^19.0.0" },
+        }),
+    );
+    project.craft().arg("install").assert().success();
+
+    project
+        .craft()
+        .args(["remove", "ms", "react"])
+        .assert()
+        .success();
+
+    assert_eq!(project.package_json(), json!({ "name": "lib" }));
+    assert!(project.require("ms").is_err());
+    assert!(project.require("react").is_err());
+    let lock: serde_json::Value =
+        serde_json::from_str(&project.read_file("craft.lock")).expect("craft.lock is JSON");
+    assert_eq!(lock["packages"], json!({}));
+}
