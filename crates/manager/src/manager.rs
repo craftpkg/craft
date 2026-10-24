@@ -1,7 +1,8 @@
 use actor::{
     AddActorPayload, AddPackageActor, CleanCacheActor, CleanCacheActorPayload, InitActor,
-    InspectActor, InspectPayload, InstallActor, InstallOptions, ListScriptsActor,
+    InspectActor, InspectPayload, InstallActor, InstallOptions, ListScriptsActor, OutdatedActor,
     RemoveActorPayload, RemovePackageActor, RunScriptActor, RunScriptActorPayload, TrustActor,
+    UpdateActor, UpdatePayload,
 };
 use cli::{Action, CacheCommands};
 use contract::{Actor, Context};
@@ -54,6 +55,12 @@ impl CraftManager {
             Action::ListScripts => ListScriptsActor::with(context, ()).run().await,
             Action::Init => InitActor::with(context, ()).run().await,
             Action::Trust { packages } => TrustActor::with(context, packages).run().await,
+            Action::Outdated => OutdatedActor::with(context, ()).run().await,
+            Action::Update { packages, latest } => {
+                UpdateActor::with(context, UpdatePayload { packages, latest })
+                    .run()
+                    .await
+            }
             Action::List { depth } => {
                 InspectActor::with(context, InspectPayload::List { depth })
                     .run()
