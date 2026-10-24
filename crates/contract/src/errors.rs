@@ -25,6 +25,18 @@ pub enum ContextError {
 }
 
 #[derive(Error, Debug)]
+pub enum SpecError {
+    #[error("invalid dependency spec: {dependency}")]
+    Invalid { dependency: String },
+
+    #[error("{kind} dependencies are not supported yet: {dependency}")]
+    Unsupported {
+        kind: &'static str,
+        dependency: String,
+    },
+}
+
+#[derive(Error, Debug)]
 pub enum PackageError {
     #[error("no package.json found")]
     NoPackageJson,
