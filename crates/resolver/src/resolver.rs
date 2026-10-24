@@ -5,7 +5,7 @@ use crate::sources::{
 };
 use crate::{ArtifactSource, NpmResolver, ResolvedArtifact, download_artifact::DownloadArtifact};
 use anyhow::{Context as _, anyhow};
-use contract::{Context, Result, SpecError};
+use contract::{Context, LockfileError, Result, SpecError};
 use lockfile::Lockfile;
 use network::Network;
 use package::{DependencySpec, InstallPackage};
@@ -18,6 +18,8 @@ use tokio::sync::Mutex;
 pub struct Resolver {
     npm_resolver: NpmResolver,
     locked: LockPreferences,
+    /// Frozen installs may only use what craft.lock records; anything else is an error.
+    is_frozen: bool,
     network: Network,
     context: Context,
     // File-level locks to prevent concurrent downloads to the same file
@@ -29,6 +31,7 @@ impl Resolver {
         Self {
             npm_resolver: NpmResolver::new(context.registry.clone()),
             locked: LockPreferences::default(),
+            is_frozen: false,
             network: Network::new(),
             context: context.clone(),
             download_locks: Arc::new(Mutex::new(HashMap::new())),
@@ -37,6 +40,11 @@ impl Resolver {
 
     pub fn with_lockfile(mut self, lockfile: &Lockfile) -> Self {
         self.locked = LockPreferences::from_lockfile(lockfile);
+        self
+    }
+
+    pub fn frozen(mut self) -> Self {
+        self.is_frozen = true;
         self
     }
 
@@ -61,6 +69,12 @@ impl Resolver {
                     debug::info!("Using locked {name}@{}", artifact.version);
                     return Ok(artifact);
                 }
+                if self.is_frozen {
+                    return Err(LockfileError::NotLocked {
+                        dependency: package.to_string(),
+                    }
+                    .into());
+                }
                 debug::info!("Resolving npm package: {name}@{requirement}");
                 self.npm_resolver.resolve(name, requirement).await
             }
@@ -80,6 +94,13 @@ impl Resolver {
             }
             DependencySpec::Git { url, .. } => {
                 let locked = package.prefer_locked.then_some(&self.locked);
+                let locked_commit = locked.and_then(|locked| locked.git_commit_for_spec(url));
+                if self.is_frozen && locked_commit.is_none() {
+                    return Err(LockfileError::NotLocked {
+                        dependency: package.to_string(),
+                    }
+                    .into());
+                }
                 resolve_git(&self.context, &self.network, requested_name, url, locked).await
             }
             DependencySpec::Workspace { .. } => Err(SpecError::Unsupported {
