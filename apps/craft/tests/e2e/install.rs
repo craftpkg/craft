@@ -81,6 +81,53 @@ fn links_different_versions_of_one_package_where_each_is_required() {
 }
 
 #[test]
+fn installs_cyclic_dependencies() {
+    let registry = MockRegistry::start();
+    registry
+        .publish(PackageFixture::new("chicken", "1.0.0").dependency("egg", "^1.0.0"))
+        .publish(PackageFixture::new("egg", "1.0.0").dependency("chicken", "^1.0.0"));
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "chicken": "^1.0.0" } }),
+    );
+
+    project.craft().arg("install").assert().success();
+
+    let chicken = project.require("chicken").expect("chicken loads");
+    assert_eq!(chicken["dependencies"]["egg"], "1.0.0");
+}
+
+#[test]
+fn downloads_each_version_once_for_overlapping_ranges() {
+    let registry = MockRegistry::start();
+    registry
+        .publish(PackageFixture::new("ms", "2.1.3"))
+        .publish(PackageFixture::new("a", "1.0.0").dependency("ms", "^2.0.0"))
+        .publish(PackageFixture::new("b", "1.0.0").dependency("ms", "~2.1.0"));
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "a": "1.0.0", "b": "1.0.0", "ms": "2.1.3" } }),
+    );
+
+    project.craft().arg("install").assert().success();
+
+    let ms_downloads = registry
+        .requested_paths()
+        .iter()
+        .filter(|path| path.ends_with("/ms-2.1.3.tgz"))
+        .count();
+    assert_eq!(ms_downloads, 1);
+    assert_eq!(
+        project.require("a").expect("a loads")["dependencies"]["ms"],
+        "2.1.3"
+    );
+    assert_eq!(
+        project.require("b").expect("b loads")["dependencies"]["ms"],
+        "2.1.3"
+    );
+}
+
+#[test]
 fn installs_scoped_packages() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("@tanstack/query-core", "5.90.10"));
@@ -188,7 +235,6 @@ fn prefers_latest_dist_tag_within_range() {
 }
 
 #[test]
-#[ignore = "fixed by 1.3: aliased root dependencies are never linked"]
 fn links_aliased_root_dependencies() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("string-width", "4.2.3"));
@@ -205,7 +251,6 @@ fn links_aliased_root_dependencies() {
 }
 
 #[test]
-#[ignore = "fixed by 1.3: aliased transitive dependencies are never linked"]
 fn links_aliased_transitive_dependencies() {
     let registry = MockRegistry::start();
     registry
