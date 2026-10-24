@@ -37,6 +37,8 @@ pub enum DependencyKind {
     Production,
     Development,
     Peer,
+    /// `optionalDependencies`: skipped when unsupported on the host or failing to install.
+    Optional,
 }
 
 /// A dependency as its dependent declared it, and the node it resolved to.
