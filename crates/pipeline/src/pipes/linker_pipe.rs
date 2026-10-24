@@ -301,6 +301,7 @@ mod tests {
                 ResolvedNode {
                     artifact,
                     dependencies: vec![],
+                    peers: vec![],
                 },
             )]
             .into(),
