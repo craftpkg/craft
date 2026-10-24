@@ -6,6 +6,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 
 use crate::constants::DEFAULT_REGISTRY;
 
+const DEFAULT_FETCH_RETRIES: u32 = 2;
+
 /// Registry settings from `.npmrc` files and the environment: where each package is fetched
 /// from, which credentials go to which host, and how to reach the network.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +22,8 @@ pub struct RegistryConfig {
     pub no_proxy: Option<String>,
     pub strict_ssl: bool,
     pub cafile: Option<PathBuf>,
+    /// How many times a failed request is retried (`fetch-retries`, 2 by default as in npm).
+    pub fetch_retries: u32,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -60,6 +64,7 @@ impl Default for RegistryConfig {
             no_proxy: None,
             strict_ssl: true,
             cafile: None,
+            fetch_retries: DEFAULT_FETCH_RETRIES,
         }
     }
 }
@@ -186,6 +191,11 @@ impl RegistryConfig {
             "noproxy" | "no-proxy" => self.no_proxy = Some(value.to_string()),
             "strict-ssl" => self.strict_ssl = value != "false",
             "cafile" => self.cafile = Some(PathBuf::from(value)),
+            "fetch-retries" => {
+                if let Ok(retries) = value.parse() {
+                    self.fetch_retries = retries;
+                }
+            }
             _ => {}
         }
     }
@@ -350,6 +360,11 @@ mod tests {
         assert!(!config.strict_ssl);
         assert_eq!(config.cafile, Some(PathBuf::from("/etc/corp-ca.pem")));
         assert_eq!(config.no_proxy.as_deref(), Some("localhost"));
+        assert_eq!(config.fetch_retries, DEFAULT_FETCH_RETRIES);
+        assert_eq!(
+            super::tests::config("fetch-retries=5\n", &[]).fetch_retries,
+            5
+        );
     }
 
     #[test]
