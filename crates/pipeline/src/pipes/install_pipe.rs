@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use contract::{Context, Pipeline, Result};
@@ -17,7 +16,7 @@ type RequestSlot = Arc<Mutex<Option<NodeId>>>;
 
 pub struct InstallPipe {
     packages: Vec<InstallPackage>,
-    cache_dir: PathBuf,
+    context: Context,
     resolver: Resolver,
     // One slot per distinct name + spec; it holds the node that request resolved to.
     requests: Mutex<HashMap<String, RequestSlot>>,
@@ -28,12 +27,10 @@ pub struct InstallPipe {
 
 impl InstallPipe {
     pub fn new(context: &Context, packages: Vec<InstallPackage>) -> Self {
-        let cache_dir = context.package_cache_dir();
-
         Self {
             packages,
-            resolver: Resolver::new(cache_dir.clone(), context.registry.clone()),
-            cache_dir,
+            context: context.clone(),
+            resolver: Resolver::new(context.package_cache_dir(), context.registry.clone()),
             requests: Mutex::new(HashMap::new()),
             claimed_nodes: Mutex::new(HashSet::new()),
             nodes: Mutex::new(BTreeMap::new()),
@@ -79,15 +76,13 @@ impl InstallPipe {
 
     async fn fetch(&self, artifact: &ResolvedArtifact) -> Result<()> {
         let download_artifact = self.resolver.download(artifact).await?;
-        let unzip_dir = self
-            .cache_dir
-            .join(format!("{}-{}", artifact.name, artifact.version));
+        let package_dir = self.context.package_dir(&artifact.name, &artifact.version);
 
-        if unzip_dir.exists() {
+        if package_dir.exists() {
             debug::info!("Package {} already unzipped", artifact.name);
             return Ok(());
         }
-        unzip(download_artifact.path, unzip_dir).await
+        unzip(download_artifact.path, package_dir).await
     }
 
     async fn resolve_dependencies(&self, artifact: &ResolvedArtifact) -> Result<Vec<Edge>> {
