@@ -152,30 +152,39 @@ async fn move_into_place(staging: &Path, link: &Path) -> io::Result<()> {
 
 /// Windows cannot rename onto an existing directory (and Wine reports success without moving
 /// anything), so the old entry is removed first and the move confirmed. Another writer may put
-/// a link in place in between; once `link` points where `staging` does, the work is done.
+/// a link in place in between, and a link another writer is deleting stays "delete pending"
+/// for a moment, refusing both removal and renaming with "Access is denied"; so this retries,
+/// and once `link` points where `staging` does, the work is done.
 #[cfg(windows)]
 async fn move_into_place(staging: &Path, link: &Path) -> io::Result<()> {
-    const ATTEMPTS: usize = 16;
+    const ATTEMPTS: u64 = 32;
 
     let wanted = read_link_resolved(staging).await?;
-    for _ in 0..ATTEMPTS {
+    let mut last_error = None;
+    for attempt in 1..=ATTEMPTS {
         let is_in_place = read_link_resolved(link)
             .await
             .is_ok_and(|current| current == wanted);
         if is_in_place {
             return remove_link_or_file(staging).await;
         }
-        remove_entry_inner(link).await?;
-        let renamed = fs::rename(staging, link).await.is_ok();
-        let is_moved = renamed && fs::symlink_metadata(staging).await.is_err();
-        if is_moved {
-            return Ok(());
+        let moved = match remove_entry_inner(link).await {
+            Ok(_) => fs::rename(staging, link).await,
+            Err(error) => Err(error),
+        };
+        match moved {
+            Ok(()) if fs::symlink_metadata(staging).await.is_err() => return Ok(()),
+            Ok(()) => {}
+            Err(error) => last_error = Some(error),
         }
+        tokio::time::sleep(std::time::Duration::from_millis(attempt)).await;
     }
-    Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        "it kept being replaced by another process",
-    ))
+    Err(last_error.unwrap_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "it kept being replaced by another process",
+        )
+    }))
 }
 
 fn is_blocked(error: &io::Error) -> bool {
