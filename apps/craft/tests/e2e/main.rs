@@ -8,6 +8,7 @@ mod lockfile;
 mod peers;
 mod platforms;
 mod prune;
+mod registry;
 mod remove;
 mod run;
 mod scripts;
