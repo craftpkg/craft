@@ -18,13 +18,13 @@ async fn run() -> Result<()> {
     let cli = Cli::parse_args();
     let action = cli.normalize();
 
-    if cli.verbose {
+    if cli.debug {
         debug::init();
     }
 
     debug::trace!("CLI: {:?}", &cli);
 
-    let mut context = Context::from_env(cli.verbose)?;
+    let mut context = Context::from_env(cli.debug)?;
     context.reporter = Reporter::new(output_mode(&cli, context.ci));
     if cli.offline {
         context.registry.network_mode = NetworkMode::Offline;
@@ -36,13 +36,13 @@ async fn run() -> Result<()> {
     manager.handle_command(action).await
 }
 
-/// A live status line only on an interactive terminal; verbose logs and CI get plain output.
+/// A live status line only on an interactive terminal; debug logs and CI get plain output.
 fn output_mode(cli: &Cli, ci: bool) -> OutputMode {
     if cli.silent {
         return OutputMode::Silent;
     }
     let is_terminal = std::io::stderr().is_terminal();
-    let is_interactive = is_terminal && !ci && !cli.verbose;
+    let is_interactive = is_terminal && !ci && !cli.debug;
     if is_interactive {
         OutputMode::Interactive
     } else {
