@@ -8,6 +8,7 @@ mod remove_package_actor;
 mod run_script_actor;
 mod scripts;
 mod summary;
+mod trust_actor;
 
 pub use add_package_actor::{AddActorPayload, AddPackageActor};
 pub use clean_cache_actor::{CleanCacheActor, CleanCacheActorPayload};
@@ -16,3 +17,4 @@ pub use inspect_actor::{InspectActor, InspectPayload};
 pub use install_actor::{InstallActor, InstallOptions};
 pub use remove_package_actor::{RemoveActorPayload, RemovePackageActor};
 pub use run_script_actor::{ListScriptsActor, RunScriptActor, RunScriptActorPayload};
+pub use trust_actor::TrustActor;
