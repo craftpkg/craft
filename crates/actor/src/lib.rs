@@ -1,6 +1,7 @@
 mod add_package_actor;
 mod clean_cache_actor;
 mod install_actor;
+mod lock_state;
 mod remove_package_actor;
 mod run_script_actor;
 
