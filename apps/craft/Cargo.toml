@@ -18,6 +18,7 @@ workspace = true
 
 [dev-dependencies]
 testkit = { path = "../../crates/testkit" }
+fsutil = { path = "../../crates/fsutil" }
 assert_cmd = "2.0"
 predicates = "3.1"
 serde_json = "1.0"
