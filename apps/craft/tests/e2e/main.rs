@@ -2,6 +2,7 @@
 
 mod add;
 mod cache;
+mod cli;
 mod common;
 mod install;
 mod layout;
