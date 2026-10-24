@@ -79,16 +79,11 @@ impl MockRegistry {
             .integrity_override
             .clone()
             .unwrap_or_else(|| sri_sha512(&tarball));
-        let tarball_path = format!(
-            "/{}/-/{}-{}.tgz",
-            package.name,
-            unscoped_name(&package.name),
-            package.version
-        );
+        let tarball_path = tarball_path(&package.name, &package.version);
 
         let mut manifest = package.manifest();
         manifest["dist"] = json!({
-            "tarball": format!("{}{tarball_path}", self.url),
+            "tarball": self.tarball_url(&package.name, &package.version),
             "integrity": integrity,
         });
 
@@ -113,10 +108,15 @@ impl MockRegistry {
         self
     }
 
+    pub fn tarball_url(&self, name: &str, version: &str) -> String {
+        format!("{}{}", self.url, tarball_path(name, version))
+    }
+
     /// Leaves the version in the packument but makes its tarball URL return 404.
     pub fn remove_tarball(&self, name: &str, version: &str) -> &Self {
-        let tarball_path = format!("/{name}/-/{}-{version}.tgz", unscoped_name(name));
-        lock(&self.state).tarballs.remove(&tarball_path);
+        lock(&self.state)
+            .tarballs
+            .remove(&tarball_path(name, version));
         self
     }
 
@@ -168,6 +168,10 @@ fn lock(state: &Mutex<RegistryState>) -> MutexGuard<'_, RegistryState> {
     state
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn tarball_path(name: &str, version: &str) -> String {
+    format!("/{name}/-/{}-{version}.tgz", unscoped_name(name))
 }
 
 fn empty_packument(name: &str) -> Value {
