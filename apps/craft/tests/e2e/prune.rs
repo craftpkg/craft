@@ -124,7 +124,7 @@ fn virtual_store_entries(project: &Project) -> Vec<String> {
         .expect("virtual store exists")
         .flatten()
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|name| name != "node_modules")
+        .filter(|name| name != "node_modules" && name != "lock.json")
         .collect();
     entries.sort();
     entries
