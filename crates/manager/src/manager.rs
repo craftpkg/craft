@@ -2,7 +2,7 @@ use actor::{
     AddActorPayload, AddPackageActor, CleanCacheActor, CleanCacheActorPayload, InstallActor,
     RemoveActorPayload, RemovePackageActor, RunScriptActor, RunScriptActorPayload,
 };
-use cli::{CacheCommands, Commands};
+use cli::{Action, CacheCommands};
 use contract::{Actor, Context};
 
 pub struct CraftManager {
@@ -14,11 +14,11 @@ impl CraftManager {
         Self { context }
     }
 
-    pub async fn handle_command(&self, command: Commands) -> contract::Result<()> {
+    pub async fn handle_command(&self, action: Action) -> contract::Result<()> {
         let context = self.context.clone();
 
-        match command {
-            Commands::Add { packages, dev } => {
+        match action {
+            Action::Add { packages, dev } => {
                 AddPackageActor::with(
                     context,
                     AddActorPayload {
@@ -29,61 +29,24 @@ impl CraftManager {
                 .run()
                 .await
             }
-            Commands::Remove { packages } => {
+            Action::Remove { packages } => {
                 RemovePackageActor::with(context, RemoveActorPayload { packages })
                     .run()
                     .await
             }
-            Commands::Run { script, args } => {
+            Action::Run { script, args } => {
                 RunScriptActor::with(context, RunScriptActorPayload { script, args })
                     .run()
                     .await
             }
-            Commands::Cache { command } => match command {
+            Action::Cache { command } => match command {
                 CacheCommands::Clean { force } => {
                     CleanCacheActor::with(context, CleanCacheActorPayload { force })
                         .run()
                         .await
                 }
             },
-            Commands::Start => {
-                RunScriptActor::with(
-                    context,
-                    RunScriptActorPayload {
-                        script: "start".to_string(),
-                        args: vec![],
-                    },
-                )
-                .run()
-                .await
-            }
-            Commands::Test => {
-                RunScriptActor::with(
-                    context,
-                    RunScriptActorPayload {
-                        script: "test".to_string(),
-                        args: vec![],
-                    },
-                )
-                .run()
-                .await
-            }
-            Commands::Install => InstallActor::with(context, ()).run().await,
-            Commands::External(args) => {
-                if let Some(script) = args.first() {
-                    RunScriptActor::with(
-                        context,
-                        RunScriptActorPayload {
-                            script: script.clone(),
-                            args: args[1..].to_vec(),
-                        },
-                    )
-                    .run()
-                    .await
-                } else {
-                    InstallActor::with(context, ()).run().await
-                }
-            }
+            Action::Install => InstallActor::with(context, ()).run().await,
         }
     }
 }
@@ -91,12 +54,11 @@ impl CraftManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cli::Commands;
     use contract::Result;
     use tempfile::TempDir;
 
     #[tokio::test]
-    async fn test_start_runs_start_script() -> Result<()> {
+    async fn test_run_start_runs_start_script() -> Result<()> {
         let temp_dir = tempfile::tempdir()?;
         write_package_json(
             &temp_dir,
@@ -105,7 +67,10 @@ mod tests {
         .await?;
 
         temp_manager(&temp_dir)
-            .handle_command(Commands::Start)
+            .handle_command(Action::Run {
+                script: "start".to_string(),
+                args: vec![],
+            })
             .await?;
 
         assert!(temp_dir.path().join("started.txt").exists());
@@ -122,7 +87,7 @@ mod tests {
         .await?;
 
         temp_manager(&temp_dir)
-            .handle_command(Commands::Run {
+            .handle_command(Action::Run {
                 script: "greet".to_string(),
                 args: vec![],
             })
@@ -137,7 +102,7 @@ mod tests {
         let temp_dir = tempfile::tempdir()?;
 
         let result = temp_manager(&temp_dir)
-            .handle_command(Commands::Install)
+            .handle_command(Action::Install)
             .await;
 
         let error = result.err().map(|e| e.to_string());
@@ -155,7 +120,7 @@ mod tests {
         .await?;
 
         temp_manager(&temp_dir)
-            .handle_command(Commands::Remove {
+            .handle_command(Action::Remove {
                 packages: vec!["ms".to_string()],
             })
             .await?;
@@ -175,7 +140,7 @@ mod tests {
         tokio::fs::create_dir_all(&cached_package).await?;
 
         manager
-            .handle_command(Commands::Cache {
+            .handle_command(Action::Cache {
                 command: CacheCommands::Clean { force: true },
             })
             .await?;
@@ -193,7 +158,7 @@ mod tests {
         tokio::fs::create_dir_all(&cached_package).await?;
 
         manager
-            .handle_command(Commands::Cache {
+            .handle_command(Action::Cache {
                 command: CacheCommands::Clean { force: false },
             })
             .await?;
