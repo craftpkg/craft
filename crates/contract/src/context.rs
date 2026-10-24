@@ -69,6 +69,11 @@ impl Context {
         self.craft_home.join("store").join(STORE_VERSION)
     }
 
+    /// Registry metadata kept between installs, revalidated with ETags.
+    pub fn metadata_cache_dir(&self) -> PathBuf {
+        self.craft_home.join("cache").join("metadata")
+    }
+
     /// Where packages were cached before the store; no longer written, only cleaned.
     pub fn legacy_cache_dir(&self) -> PathBuf {
         self.craft_home.join("packages")
