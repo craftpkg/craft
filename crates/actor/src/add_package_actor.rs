@@ -3,7 +3,7 @@ use package::{DependencySection, InstallPackage, PackageJson, ProjectManifest};
 use pipeline::{InstallPipe, LinkerPipe};
 use resolver::{ArtifactSource, Edge, ResolvedArtifact};
 
-use crate::install_actor::manifest_packages;
+use crate::install_actor::{manifest_packages, manifest_specifiers, save_lockfile};
 
 #[derive(Debug)]
 pub struct AddActorPayload {
@@ -62,16 +62,17 @@ impl Actor<AddActorPayload> for AddPackageActor {
         } else {
             DependencySection::Dependencies
         };
+        let mut specifiers = manifest_specifiers(&package_json);
         for root in &added_roots {
             let spec = saved_spec(root, &graph.target(root)?.artifact, self.payload.is_exact);
             debug::info!("Saving {}@{}", root.name, spec);
             save_dependency(&mut manifest, section, &root.name, &spec);
+            specifiers.insert(root.name.clone(), spec);
         }
 
         manifest.save().await?;
         debug::info!("Updated package.json");
-
-        Ok(())
+        save_lockfile(&self.context, &graph, &specifiers).await
     }
 }
 
