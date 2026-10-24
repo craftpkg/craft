@@ -9,6 +9,7 @@ pub use anyhow::Result;
 pub use constants::{CRAFT_HOME, CRAFT_REGISTRY, DEFAULT_REGISTRY};
 pub use context::Context;
 pub use errors::{
-    ContextError, NetworkError, PackageError, PipelineError, RegistryError, SpecError, TarballError,
+    ContextError, IntegrityError, NetworkError, PackageError, PipelineError, RegistryError,
+    SpecError, TarballError,
 };
 pub use pipeline::Pipeline;
