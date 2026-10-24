@@ -1,5 +1,6 @@
-pub mod lockfile;
-pub mod package_entry;
+mod lockfile;
 
-pub use lockfile::Lockfile;
-pub use package_entry::PackageEntry;
+pub use lockfile::{
+    Importer, LOCKFILE_NAME, LOCKFILE_VERSION, LockedDependency, LockedPackage, LockedSource,
+    Lockfile, ROOT_IMPORTER,
+};
