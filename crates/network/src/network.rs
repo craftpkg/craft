@@ -215,6 +215,7 @@ impl Network {
                 is_retryable: is_retryable_status(status.as_u16()),
                 retry_after,
                 is_unreachable: false,
+                is_untrusted_certificate: false,
             });
         }
         Ok(PermittedResponse {
@@ -286,6 +287,8 @@ struct Failure {
     retry_after: Option<Duration>,
     /// The request never got a response: no connection, or it timed out.
     is_unreachable: bool,
+    /// The TLS handshake failed on the server's certificate; retrying cannot help.
+    is_untrusted_certificate: bool,
 }
 
 impl Failure {
@@ -295,17 +298,20 @@ impl Failure {
             is_retryable: false,
             retry_after: None,
             is_unreachable: false,
+            is_untrusted_certificate: false,
         }
     }
 
     fn from_transport(error: reqwest::Error) -> Self {
+        let is_untrusted_certificate = mentions_certificate(&error);
         let is_unreachable = error.is_connect() || error.is_timeout();
-        let is_retryable = is_unreachable || error.is_body() || error.is_request();
+        let is_transient = is_unreachable || error.is_body() || error.is_request();
         Self {
             error: error.into(),
-            is_retryable,
+            is_retryable: is_transient && !is_untrusted_certificate,
             retry_after: None,
             is_unreachable,
+            is_untrusted_certificate,
         }
     }
 
@@ -322,10 +328,26 @@ impl Failure {
             .next()
             .unwrap_or(url);
         let reason = self.error.root_cause();
+        if self.is_untrusted_certificate {
+            return anyhow::anyhow!(
+                "could not verify the certificate of {host} ({reason}); point cafile in .npmrc at your registry's CA certificate, or set strict-ssl=false"
+            );
+        }
         anyhow::anyhow!(
             "could not reach {host} ({reason}); check your network connection and proxy settings, or use --offline"
         )
     }
+}
+
+fn mentions_certificate(error: &reqwest::Error) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(cause) = source {
+        if cause.to_string().contains("certificate") {
+            return true;
+        }
+        source = cause.source();
+    }
+    false
 }
 
 fn is_retryable_status(status: u16) -> bool {
