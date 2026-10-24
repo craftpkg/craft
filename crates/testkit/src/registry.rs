@@ -22,11 +22,14 @@ pub struct MockRegistry {
     acceptor: Option<JoinHandle<()>>,
 }
 
+#[derive(Default)]
 struct MockResponse {
     status: u16,
     content_type: &'static str,
     body: Vec<u8>,
     retry_after: Option<u64>,
+    etag: Option<String>,
+    max_age: Option<u64>,
 }
 
 #[derive(Default)]
@@ -42,6 +45,9 @@ struct RegistryState {
     pending_failures: Option<(usize, u16, Option<u64>)>,
     in_flight: usize,
     max_in_flight: usize,
+    /// `Cache-Control: max-age` to send with packuments.
+    max_age: Option<u64>,
+    not_modified: usize,
 }
 
 impl MockRegistry {
@@ -141,6 +147,17 @@ impl MockRegistry {
         self
     }
 
+    /// Sends `Cache-Control: max-age=<seconds>` with every packument.
+    pub fn set_max_age(&self, seconds: u64) -> &Self {
+        lock(&self.state).max_age = Some(seconds);
+        self
+    }
+
+    /// How many conditional requests were answered `304 Not Modified`.
+    pub fn not_modified_responses(&self) -> usize {
+        lock(&self.state).not_modified
+    }
+
     /// The most requests that were being answered at the same time.
     pub fn max_concurrent_requests(&self) -> usize {
         lock(&self.state).max_in_flight
@@ -178,6 +195,7 @@ impl RegistryState {
         url: &str,
         authorization: Option<String>,
         user_agent: Option<String>,
+        if_none_match: Option<String>,
     ) -> MockResponse {
         self.user_agents.push(user_agent);
         if let Some((remaining, status, retry_after)) = self.pending_failures.take() {
@@ -190,6 +208,7 @@ impl RegistryState {
                 content_type: "application/json",
                 body: br#"{"error":"Temporarily unavailable"}"#.to_vec(),
                 retry_after,
+                ..MockResponse::default()
             };
         }
         let expected = self
@@ -204,10 +223,20 @@ impl RegistryState {
                 status: 401,
                 content_type: "application/json",
                 body: br#"{"error":"Unauthorized"}"#.to_vec(),
-                retry_after: None,
+                ..MockResponse::default()
             };
         }
-        self.respond(url)
+        let response = self.respond(url);
+        let is_not_modified = response.etag.is_some() && response.etag == if_none_match;
+        if is_not_modified {
+            self.not_modified += 1;
+            return MockResponse {
+                status: 304,
+                body: Vec::new(),
+                ..response
+            };
+        }
+        response
     }
 
     fn respond(&mut self, url: &str) -> MockResponse {
@@ -219,22 +248,27 @@ impl RegistryState {
                 status: 200,
                 content_type: "application/octet-stream",
                 body: tarball.clone(),
-                retry_after: None,
+                ..MockResponse::default()
             };
         }
 
         match self.packuments.get(path.trim_start_matches('/')) {
-            Some(packument) => MockResponse {
-                status: 200,
-                content_type: "application/json",
-                body: packument.to_string().into_bytes(),
-                retry_after: None,
-            },
+            Some(packument) => {
+                let body = packument.to_string().into_bytes();
+                MockResponse {
+                    status: 200,
+                    content_type: "application/json",
+                    etag: Some(format!("\"{}\"", sri_sha512(&body))),
+                    max_age: self.max_age,
+                    body,
+                    ..MockResponse::default()
+                }
+            }
             None => MockResponse {
                 status: 404,
                 content_type: "application/json",
                 body: br#"{"error":"Not found"}"#.to_vec(),
-                retry_after: None,
+                ..MockResponse::default()
             },
         }
     }
@@ -295,6 +329,7 @@ fn answer(stream: &TcpStream, state: &Mutex<RegistryState>) {
     let mut header_line = String::new();
     let mut authorization = None;
     let mut user_agent = None;
+    let mut if_none_match = None;
     loop {
         header_line.clear();
         let is_end_of_headers = matches!(reader.read_line(&mut header_line), Ok(0) | Err(_))
@@ -308,25 +343,34 @@ fn answer(stream: &TcpStream, state: &Mutex<RegistryState>) {
                 authorization = Some(value.trim().to_string());
             } else if name.eq_ignore_ascii_case("user-agent") {
                 user_agent = Some(value.trim().to_string());
+            } else if name.eq_ignore_ascii_case("if-none-match") {
+                if_none_match = Some(value.trim().to_string());
             }
         }
     }
 
     let path = request_line.split_whitespace().nth(1).unwrap_or("/");
-    let response = lock(state).respond_authorized(path, authorization, user_agent);
+    let response = lock(state).respond_authorized(path, authorization, user_agent, if_none_match);
     let reason = match response.status {
         200 => "OK",
+        304 => "Not Modified",
         401 => "Unauthorized",
         404 => "Not Found",
         429 => "Too Many Requests",
         _ => "Service Unavailable",
     };
-    let retry_after = response
+    let mut extra_headers = response
         .retry_after
         .map(|seconds| format!("Retry-After: {seconds}\r\n"))
         .unwrap_or_default();
+    if let Some(etag) = &response.etag {
+        extra_headers.push_str(&format!("ETag: {etag}\r\n"));
+    }
+    if let Some(max_age) = response.max_age {
+        extra_headers.push_str(&format!("Cache-Control: max-age={max_age}\r\n"));
+    }
     let head = format!(
-        "HTTP/1.1 {} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{retry_after}Connection: close\r\n\r\n",
+        "HTTP/1.1 {} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{extra_headers}Connection: close\r\n\r\n",
         response.status,
         response.content_type,
         response.body.len()
