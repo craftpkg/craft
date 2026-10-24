@@ -34,7 +34,7 @@ impl LinkerPipe {
         debug::info!("Hydrating package: {}", node.artifact.name);
 
         let node_modules = self.package_dir(&node.artifact).join("node_modules");
-        fs::create_dir_all(&node_modules).await?;
+        fsutil::ensure_dir(&node_modules).await?;
 
         for edge in &node.dependencies {
             self.link_edge(edge, &node_modules).await?;
@@ -47,26 +47,7 @@ impl LinkerPipe {
         let target = self.graph.target(edge)?;
         let source_dir = self.package_dir(&target.artifact);
         let dest_path = node_modules.join(&edge.name);
-
-        // Create parent dirs for scoped packages
-        if let Some(parent) = dest_path.parent() {
-            fs::create_dir_all(parent).await?;
-        }
-
-        // Remove existing link/directory if it exists
-        if dest_path.exists() {
-            if dest_path.is_symlink() {
-                fs::remove_file(&dest_path).await?;
-            } else {
-                fs::remove_dir_all(&dest_path).await?;
-            }
-        }
-
-        #[cfg(unix)]
-        tokio::fs::symlink(&source_dir, &dest_path).await?;
-        #[cfg(windows)]
-        tokio::fs::symlink_dir(&source_dir, &dest_path).await?;
-
+        fsutil::force_symlink_dir(&source_dir, &dest_path).await?;
         debug::info!("Linked {} -> {:?}", edge.name, source_dir);
 
         self.link_package_binaries(&edge.name, &target.artifact, node_modules)
@@ -85,7 +66,7 @@ impl LinkerPipe {
         };
         if let Some(bin) = &pkg_json.bin {
             let bin_dir = node_modules_dir.join(".bin");
-            fs::create_dir_all(&bin_dir).await?;
+            fsutil::ensure_dir(&bin_dir).await?;
 
             let bins = match bin {
                 PackageBin::String(path) => {
@@ -98,35 +79,18 @@ impl LinkerPipe {
 
             for (bin_name, bin_path) in bins {
                 let target_path = bin_dir.join(&bin_name);
-
-                let package_dir = node_modules_dir.join(link_name);
-                let source_path = package_dir.join(&bin_path);
-
-                // Remove existing link if exists
-                if target_path.exists() {
-                    if target_path.is_symlink() {
-                        fs::remove_file(&target_path).await?;
-                    } else {
-                        fs::remove_dir_all(&target_path).await?;
-                    }
-                }
+                let source_path = node_modules_dir.join(link_name).join(&bin_path);
+                let relative_source = fsutil::relative_target(&target_path, &source_path);
+                fsutil::force_symlink_file(&relative_source, &target_path).await?;
 
                 #[cfg(unix)]
                 {
-                    tokio::fs::symlink(&source_path, &target_path).await?;
-
-                    // Make executable
                     use std::os::unix::fs::PermissionsExt;
                     if let Ok(metadata) = fs::metadata(&source_path).await {
                         let mut perms = metadata.permissions();
                         perms.set_mode(0o755);
                         let _ = fs::set_permissions(&source_path, perms).await;
                     }
-                }
-                #[cfg(windows)]
-                {
-                    // On Windows we might need a shim, but for now let's try symlink
-                    tokio::fs::symlink_file(&source_path, &target_path).await?;
                 }
 
                 debug::info!("Linked bin {} -> {:?}", bin_name, source_path);
@@ -139,7 +103,7 @@ impl LinkerPipe {
 impl Pipeline<()> for LinkerPipe {
     async fn run(&self) -> Result<()> {
         let node_modules = self.context.node_modules_dir();
-        fs::create_dir_all(&node_modules).await?;
+        fsutil::ensure_dir(&node_modules).await?;
 
         // 1. Hydrate all packages (link dependencies in cache)
         let nodes: Vec<ResolvedNode> = self.graph.nodes.values().cloned().collect();
@@ -254,13 +218,7 @@ mod tests {
         assert!(bin_link.is_symlink());
 
         let target = tokio::fs::read_link(&bin_link).await?;
-        let expected_target = temp_cwd
-            .path()
-            .join("node_modules")
-            .join(pkg_name)
-            .join("cli.js");
-
-        assert_eq!(target, expected_target);
+        assert_eq!(target, PathBuf::from("../test-pkg/cli.js"));
 
         Ok(())
     }
