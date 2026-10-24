@@ -31,12 +31,18 @@ enum Import {
 
 /// Imports the store entry `source` as `dest`, unless `dest` already exists. The import is
 /// staged beside `dest` and renamed in, so `dest` is never partial; if another process finishes
-/// first, its copy is kept.
-pub async fn import_dir(source: &Path, dest: &Path) -> io::Result<()> {
+/// first, its copy is kept. Without `allow_hardlinks`, files are cloned or copied, for packages
+/// whose install scripts will write to them.
+pub async fn import_dir(source: &Path, dest: &Path, allow_hardlinks: bool) -> io::Result<()> {
     if dest.exists() {
         return Ok(());
     }
-    let staging = stage(source, dest, &[], Import::FromStore).await?;
+    let import = if allow_hardlinks {
+        Import::FromStore
+    } else {
+        Import::FromSource
+    };
+    let staging = stage(source, dest, &[], import).await?;
 
     match tokio::fs::rename(&staging, dest).await {
         Ok(()) => Ok(()),
@@ -227,9 +233,9 @@ mod tests {
             .path()
             .join("app/node_modules/.craft/ms@2.1.3/node_modules/ms");
 
-        import_dir(&store_entry, &dest).await.unwrap();
+        import_dir(&store_entry, &dest, true).await.unwrap();
         fs::write(dest.join("marker"), "").unwrap();
-        import_dir(&store_entry, &dest).await.unwrap();
+        import_dir(&store_entry, &dest, true).await.unwrap();
 
         assert_eq!(
             fs::read_to_string(dest.join("lib/index.js")).unwrap(),
