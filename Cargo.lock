@@ -1395,6 +1395,7 @@ dependencies = [
  "contract",
  "debug",
  "fsutil",
+ "lockfile",
  "network",
  "node-semver",
  "package",
