@@ -7,10 +7,15 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::Integrity;
 use bytes::Bytes;
-use contract::{NetworkError, RegistryConfig, Result, user_agent};
-use reqwest::header::{AUTHORIZATION, RETRY_AFTER};
+use contract::{NetworkError, NetworkMode, RegistryConfig, Result, user_agent};
+use reqwest::StatusCode;
+use reqwest::header::{
+    AUTHORIZATION, CACHE_CONTROL, ETAG, HeaderMap, HeaderValue, IF_MODIFIED_SINCE, IF_NONE_MATCH,
+    LAST_MODIFIED, RETRY_AFTER,
+};
 use reqwest::{Certificate, Client, ClientBuilder, NoProxy, Proxy, RequestBuilder};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -50,6 +55,33 @@ impl Network {
             Some(credentials) => request.header(AUTHORIZATION, credentials.header()),
             None => request,
         }
+    }
+
+    /// GETs `url` conditionally on the cached copy's validators: `NotModified` means the cached
+    /// body is still current.
+    pub async fn fetch_revalidated(
+        &self,
+        url: &str,
+        cached: Option<&Validators>,
+    ) -> Result<Revalidated> {
+        self.with_retries(url, || async {
+            let mut request = self.get(url);
+            if let Some(etag) = cached.and_then(|cached| cached.etag.as_deref()) {
+                request = request.header(IF_NONE_MATCH, etag);
+            }
+            if let Some(modified) = cached.and_then(|cached| cached.last_modified.as_deref()) {
+                request = request.header(IF_MODIFIED_SINCE, modified);
+            }
+
+            let response = self.send_request(url, request).await?;
+            let validators = Validators::from_headers(response.response.headers());
+            if response.response.status() == StatusCode::NOT_MODIFIED {
+                return Ok(Revalidated::NotModified(validators));
+            }
+            let body = response.bytes().await.map_err(Failure::from_transport)?;
+            Ok(Revalidated::Fresh { body, validators })
+        })
+        .await
     }
 
     /// Fetch JSON data from a URL and deserialize it into type [T]
@@ -144,17 +176,27 @@ impl Network {
     /// Sends the GET and checks its status, holding a request permit while the response is
     /// in flight.
     async fn send(&self, url: &str) -> std::result::Result<PermittedResponse, Failure> {
+        self.send_request(url, self.get(url)).await
+    }
+
+    async fn send_request(
+        &self,
+        url: &str,
+        request: RequestBuilder,
+    ) -> std::result::Result<PermittedResponse, Failure> {
+        if self.registry.network_mode == NetworkMode::Offline {
+            return Err(Failure::fatal(NetworkError::Offline {
+                url: url.to_string(),
+            }));
+        }
         let permit = Arc::clone(&self.permits)
             .acquire_owned()
             .await
             .map_err(Failure::fatal)?;
-        let response = self
-            .get(url)
-            .send()
-            .await
-            .map_err(Failure::from_transport)?;
+        let response = request.send().await.map_err(Failure::from_transport)?;
         let status = response.status();
-        if !status.is_success() {
+        let is_accepted = status.is_success() || status == StatusCode::NOT_MODIFIED;
+        if !is_accepted {
             let retry_after = response
                 .headers()
                 .get(RETRY_AFTER)
@@ -176,6 +218,46 @@ impl Network {
             _permit: permit,
         })
     }
+}
+
+/// What a cached response can be revalidated with, and how long it stays fresh.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Validators {
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+    /// `Cache-Control: max-age`, in seconds.
+    pub max_age: Option<u64>,
+}
+
+impl Validators {
+    fn from_headers(headers: &HeaderMap) -> Self {
+        let header = |name| {
+            headers
+                .get(name)
+                .and_then(|value: &HeaderValue| value.to_str().ok())
+                .map(str::to_string)
+        };
+        let max_age = header(CACHE_CONTROL).and_then(|cache_control| {
+            cache_control
+                .split(',')
+                .find_map(|directive| directive.trim().strip_prefix("max-age="))
+                .and_then(|seconds| seconds.parse().ok())
+        });
+        Self {
+            etag: header(ETAG),
+            last_modified: header(LAST_MODIFIED),
+            max_age,
+        }
+    }
+}
+
+pub enum Revalidated {
+    /// The cached body is current; the validators may carry a renewed `max_age`.
+    NotModified(Validators),
+    Fresh {
+        body: Bytes,
+        validators: Validators,
+    },
 }
 
 /// A response that keeps its request permit until the body has been read.
