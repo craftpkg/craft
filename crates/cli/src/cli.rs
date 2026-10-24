@@ -11,6 +11,14 @@ pub struct Cli {
 
     #[arg(short, long, global = true)]
     pub verbose: bool,
+
+    /// Use only cached registry metadata and stored packages; never touch the network.
+    #[arg(long, global = true, conflicts_with = "prefer_offline")]
+    pub offline: bool,
+
+    /// Use cached registry metadata without revalidating it; fetch only what is missing.
+    #[arg(long, global = true)]
+    pub prefer_offline: bool,
 }
 
 impl Display for Cli {
