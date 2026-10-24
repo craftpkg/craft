@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, anyhow, bail};
 use contract::{Context, PackageError, Result};
 use network::{Integrity, Network};
-use package::PackageJson;
+use package::{PackageJson, PlatformConstraints};
 use tarball::gzip::unzip;
 
 use crate::git::{GitSpec, checkout, resolve_commit};
@@ -225,6 +225,10 @@ fn artifact_from(
         version,
         source,
         integrity,
+        platform: manifest
+            .as_ref()
+            .map(PlatformConstraints::from_manifest)
+            .unwrap_or_default(),
         package: manifest,
     })
 }
