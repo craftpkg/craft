@@ -80,7 +80,7 @@ pub(crate) async fn resolve_remote_tarball(
     url: &str,
 ) -> Result<ResolvedArtifact> {
     let cache_dir = context.store_dir();
-    tokio::fs::create_dir_all(&cache_dir).await?;
+    fsutil::ensure_dir(&cache_dir).await?;
     let tarball_path = cache_dir.join(format!("tarball-url-{}.tgz", short_hash(url)));
     if !tarball_path.exists() {
         network
@@ -162,7 +162,7 @@ async fn download_tarball(
     let tarball_path = context
         .store_dir()
         .join(format!("git-{}.tgz", short_hash(url)));
-    tokio::fs::create_dir_all(context.store_dir()).await?;
+    fsutil::ensure_dir(&context.store_dir()).await?;
     network.download(url, tarball_path.clone(), None).await?;
     let extracted = unzip(tarball_path.clone(), package_dir.to_path_buf()).await;
     let _ = tokio::fs::remove_file(&tarball_path).await;
@@ -176,7 +176,7 @@ async fn check_out_into(
     package_dir: &Path,
 ) -> Result<()> {
     let cache_dir = context.store_dir();
-    tokio::fs::create_dir_all(&cache_dir).await?;
+    fsutil::ensure_dir(&cache_dir).await?;
     let checkout_dir = tempfile::Builder::new()
         .prefix(".git-checkout-")
         .tempdir_in(&cache_dir)?;
