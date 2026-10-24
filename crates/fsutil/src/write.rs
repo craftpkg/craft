@@ -14,7 +14,7 @@ pub async fn write_if_changed(path: &Path, contents: &[u8]) -> io::Result<bool> 
         .at("write", path)
 }
 
-async fn write_if_changed_inner(path: &Path, contents: &[u8]) -> io::Result<bool> {
+pub(crate) async fn write_if_changed_inner(path: &Path, contents: &[u8]) -> io::Result<bool> {
     let is_unchanged = tokio::fs::read(path)
         .await
         .is_ok_and(|existing| existing == contents);
