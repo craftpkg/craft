@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
@@ -9,6 +9,7 @@ use resolver::{ArtifactSource, Edge, NodeId, ResolutionGraph, ResolvedNode};
 use tokio::fs;
 
 use super::bins::package_bins;
+use super::prune::prune_node_modules;
 use super::virtual_store::VirtualStore;
 
 const LINK_CONCURRENCY: usize = 16;
@@ -17,7 +18,8 @@ const COPY_EXCLUDED: [&str; 2] = ["node_modules", ".git"];
 /// Lays the graph out under the project's `node_modules`: every package in the virtual store
 /// (`.craft/<entry>/node_modules/<name>`) with its dependencies linked beside it, every package
 /// name hoisted once into `.craft/node_modules`, and the project's own dependencies linked at
-/// the top. Nothing outside the project is written.
+/// the top. Whatever the graph no longer contains is pruned. Nothing outside the project is
+/// written.
 pub struct LinkerPipe {
     context: Context,
     graph: ResolutionGraph,
@@ -200,7 +202,17 @@ impl Pipeline<()> for LinkerPipe {
                 .map(|root| async move { self.link_edge(&root, node_modules).await }),
         )
         .await?;
-        self.link_bins(&self.graph.roots, node_modules).await
+        self.link_bins(&self.graph.roots, node_modules).await?;
+
+        let root_names: HashSet<String> = self
+            .graph
+            .roots
+            .iter()
+            .map(|root| root.name.clone())
+            .collect();
+        prune_node_modules(node_modules, Some(&root_names))
+            .await
+            .context("failed to prune node_modules")
     }
 }
 
