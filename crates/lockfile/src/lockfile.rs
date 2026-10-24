@@ -50,6 +50,16 @@ pub struct LockedPackage {
     /// Peer name → package key, as resolved for this instance.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub peer_dependencies: BTreeMap<String, String>,
+    /// Optional dependency name → package key, including packages for other platforms, so the
+    /// lockfile installs anywhere.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub optional_dependencies: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub os: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cpu: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub libc: Vec<String>,
 }
 
 /// Where a package came from. Paths are relative to the project directory.
@@ -81,6 +91,22 @@ pub enum LockedSource {
         url: String,
         commit: String,
     },
+}
+
+impl LockedPackage {
+    pub fn new(name: &str, version: &str, resolution: LockedSource) -> Self {
+        Self {
+            name: name.to_string(),
+            version: version.to_string(),
+            resolution,
+            dependencies: BTreeMap::new(),
+            peer_dependencies: BTreeMap::new(),
+            optional_dependencies: BTreeMap::new(),
+            os: Vec::new(),
+            cpu: Vec::new(),
+            libc: Vec::new(),
+        }
+    }
 }
 
 impl Default for Lockfile {
@@ -170,6 +196,7 @@ impl Lockfile {
             if let Some(package) = self.packages.get(key) {
                 pending.extend(package.dependencies.values());
                 pending.extend(package.peer_dependencies.values());
+                pending.extend(package.optional_dependencies.values());
             }
         }
         self.packages.retain(|key, _| reachable.contains(key));
@@ -209,6 +236,13 @@ mod tests {
                     "react".to_string(),
                     "react@19.2.0".to_string(),
                 )]),
+                ..LockedPackage::new(
+                    "ui",
+                    "1.0.0",
+                    LockedSource::Directory {
+                        path: String::new(),
+                    },
+                )
             },
         );
         lockfile
@@ -279,8 +313,13 @@ mod tests {
                 tarball: String::new(),
                 integrity: None,
             },
-            dependencies: BTreeMap::new(),
-            peer_dependencies: BTreeMap::new(),
+            ..LockedPackage::new(
+                "react",
+                "19.2.0",
+                LockedSource::Directory {
+                    path: String::new(),
+                },
+            )
         };
         lockfile.packages.insert("react@19.2.0".to_string(), react);
 
