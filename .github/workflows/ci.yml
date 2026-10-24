@@ -23,3 +23,15 @@ jobs:
 
     - name: Run make (build, test, lint)
       run: make
+
+  registry-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Run tests that need registry.npmjs.org
+      run: cargo test --workspace -- --ignored
