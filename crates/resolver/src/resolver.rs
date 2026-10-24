@@ -132,7 +132,7 @@ impl Resolver {
         debug::info!("Downloading {} to: {:?}", artifact.name, file_path);
 
         if let Some(parent) = file_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
+            fsutil::ensure_dir(parent).await?;
         }
 
         self.network
