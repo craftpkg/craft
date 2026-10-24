@@ -8,5 +8,5 @@ mod sources;
 
 pub use graph::{DependencyKind, Edge, NodeId, ResolutionGraph, ResolvedNode};
 pub use npm::NpmResolver;
-pub use resolved_artifact::{ArtifactSource, ResolvedArtifact};
+pub use resolved_artifact::{ArtifactSource, ResolvedArtifact, short_hash};
 pub use resolver::Resolver;
