@@ -1,12 +1,14 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context as _;
 use contract::{Context, Pipeline, Result};
 use futures::stream::{self, StreamExt};
-use package::InstallPackage;
+use package::{DependencySpec, InstallPackage};
 use resolver::{
-    DependencyKind, Edge, NodeId, ResolutionGraph, ResolvedArtifact, ResolvedNode, Resolver,
+    ArtifactSource, DependencyKind, Edge, NodeId, ResolutionGraph, ResolvedArtifact, ResolvedNode,
+    Resolver,
 };
 use tarball::gzip::unzip;
 use tokio::sync::Mutex;
@@ -31,7 +33,7 @@ impl InstallPipe {
         Self {
             packages,
             context: context.clone(),
-            resolver: Resolver::new(context.package_cache_dir(), context.registry.clone()),
+            resolver: Resolver::new(context),
             requests: Mutex::new(HashMap::new()),
             claimed_nodes: Mutex::new(HashSet::new()),
             nodes: Mutex::new(BTreeMap::new()),
@@ -60,7 +62,7 @@ impl InstallPipe {
             .resolve(package)
             .await
             .with_context(|| failure_message(package, ancestry))?;
-        let node_id = NodeId::new(&artifact.name, &artifact.version);
+        let node_id = artifact.node_id();
         *resolved = Some(node_id.clone());
         // Released before recursing so cyclic dependencies find this node instead of waiting on it.
         drop(resolved);
@@ -86,8 +88,15 @@ impl InstallPipe {
         Ok(node_id)
     }
 
+    /// Downloads and extracts a registry package; other sources are materialized while
+    /// resolving.
     async fn fetch(&self, artifact: &ResolvedArtifact) -> Result<()> {
-        let package_dir = self.context.package_dir(&artifact.name, &artifact.version);
+        let is_registry_package = matches!(artifact.source, ArtifactSource::Registry { .. });
+        if !is_registry_package {
+            return Ok(());
+        }
+
+        let package_dir = artifact.package_dir(&self.context);
         if package_dir.exists() {
             debug::info!("Package {} already unzipped", artifact.name);
             return Ok(());
@@ -102,6 +111,10 @@ impl InstallPipe {
         artifact: &ResolvedArtifact,
         ancestry: &[NodeId],
     ) -> Result<Vec<Edge>> {
+        let is_link = matches!(artifact.source, ArtifactSource::Link { .. });
+        if is_link {
+            return Ok(Vec::new());
+        }
         let Some(dependencies) = artifact
             .package
             .as_ref()
@@ -109,6 +122,7 @@ impl InstallPipe {
         else {
             return Ok(Vec::new());
         };
+        let base_dir = &dependency_base_dir(artifact, &self.context);
         debug::info!(
             "Resolving dependencies for {}: {:?}",
             artifact.name,
@@ -117,7 +131,8 @@ impl InstallPipe {
 
         let results: Vec<Result<Edge>> = stream::iter(dependencies)
             .map(|(name, spec)| async move {
-                let package = InstallPackage::new(name.clone(), Some(spec.clone()), false);
+                let package = InstallPackage::new(name.clone(), Some(spec.clone()), false)
+                    .with_base_dir(base_dir.clone());
                 let target = self.resolve_package(&package, ancestry).await?;
                 Ok(Edge {
                     name,
@@ -173,8 +188,11 @@ impl Pipeline<ResolutionGraph> for InstallPipe {
             .collect()
             .await;
 
-        let roots = results.into_iter().collect::<Result<Vec<_>>>()?;
+        let mut roots = results.into_iter().collect::<Result<Vec<_>>>()?;
         let nodes = self.nodes.lock().await.clone();
+        for root in &mut roots {
+            name_bare_location(root, &nodes);
+        }
 
         Ok(ResolutionGraph { roots, nodes })
     }
@@ -191,4 +209,30 @@ fn failure_message(package: &InstallPackage, ancestry: &[NodeId]) -> String {
         .collect::<Vec<_>>()
         .join(" > ");
     format!("failed to install {package} (required by {chain})")
+}
+
+/// Where a package's relative `file:` and `link:` dependencies point from: the source directory
+/// for local packages, the extracted package otherwise.
+fn dependency_base_dir(artifact: &ResolvedArtifact, context: &Context) -> PathBuf {
+    match &artifact.source {
+        ArtifactSource::Directory { path } | ArtifactSource::Link { path } => path.clone(),
+        _ => artifact.package_dir(context),
+    }
+}
+
+/// `craft add ./libs/x` requests the path itself; the root is named after the package found
+/// there and keeps the location as its spec.
+fn name_bare_location(root: &mut Edge, nodes: &BTreeMap<NodeId, ResolvedNode>) {
+    if root.spec.is_some() {
+        return;
+    }
+    let location = DependencySpec::parse(&root.name, None)
+        .ok()
+        .and_then(|spec| spec.location_spec());
+    let (Some(location), Some(node)) = (location, nodes.get(&root.target)) else {
+        return;
+    };
+
+    root.name = node.artifact.name.clone();
+    root.spec = Some(location);
 }
