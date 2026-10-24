@@ -78,7 +78,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | **Phase 6 — CLI & UX** | | | |
 | 6.1 | Progress output and install summary | P2 | [ ] |
 | 6.2 | Error reporting (no panics, contextual messages) | P2 | [ ] |
-| 6.3 | Missing commands and flags | P2 | [ ] |
+| 6.3 | Missing commands and flags | P2 | [~] basics done; why/list/outdated/update/exec/trust open |
 | 6.4 | Windows support (shims, junctions) | P2 | [ ] |
 | 6.5 | Release & docs accuracy | P2 | [ ] |
 | **Phase 7 — Later** | | | |
@@ -694,7 +694,11 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 - Print `error: <message>` + cause chain + hint, exit 1 (scripts: exit with their code, 1.12). Install `miette` or format anyhow chains manually.
 - Context on every IO error (which path, which package).
 
-### 6.3 Missing commands and flags · P2
+### 6.3 Missing commands and flags · P2 — ◐ basics done
+
+> Done (first half): `craft --version` / `-V` prints the release tag (the release workflow passes it as `CRAFT_RELEASE_VERSION`; local builds fall back to the crate version), every command and flag has help text, and npm's aliases work: `i` (with package names `install` behaves like `add`, including `-D`/`-E`), `rm`/`uninstall`/`un`, `t`. `craft run` without a name lists the scripts. `craft init` writes a minimal package.json named after the directory (normalized to a valid npm name) and refuses to overwrite one; a missing package.json now suggests it.
+>
+> Open: `why`, `list`/`ls`, `outdated`, `update`, `exec`/`dlx`/`x`, `trust`, `-O`/`-P`, `--production`/`--omit=dev`, and `-v` for version (taken by `--verbose`).
 
 - `craft --version` currently errors (`unexpected argument '--version'`) — add `#[command(version)]`, and keep `Cargo.toml` version in sync with release tags (tags are `0.0.8`, crate is `0.1.0`).
 - Aliases: `i`/`install <pkg…>` (→ add), `rm`/`uninstall`/`un`, `x`/`exec`.
