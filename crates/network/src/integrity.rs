@@ -54,6 +54,13 @@ impl Integrity {
         Ok(Self { algorithm, digests })
     }
 
+    pub fn sha512_of(bytes: &[u8]) -> Self {
+        Self {
+            algorithm: Algorithm::Sha512,
+            digests: vec![digest(Algorithm::Sha512, bytes)],
+        }
+    }
+
     pub fn from_shasum(shasum: &str) -> Result<Self, IntegrityError> {
         let bytes = decode_hex(shasum).ok_or_else(|| invalid(shasum))?;
         Ok(Self {
@@ -163,6 +170,11 @@ mod tests {
                 .verify(b"hellO")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn test_sha512_of_matches_sri() {
+        assert_eq!(Integrity::sha512_of(b"hello").to_string(), HELLO_SHA512);
     }
 
     #[test]
