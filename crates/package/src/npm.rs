@@ -1,6 +1,6 @@
 use contract::{PackageError, Result};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::Path};
 use tokio::fs;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -37,18 +37,12 @@ pub enum PackageBin {
 }
 
 impl PackageJson {
-    pub fn file_path() -> Result<PathBuf> {
-        let package_json_path = std::env::current_dir()?.join("package.json");
-        Ok(package_json_path)
-    }
-    pub async fn from_file() -> Result<Self> {
-        let package_json_path = Self::file_path()?;
-
+    pub async fn from_file(package_json_path: &Path) -> Result<Self> {
         if !package_json_path.exists() {
             return Err(PackageError::NoPackageJson.into());
         }
 
-        let content = fs::read_to_string(&package_json_path).await?;
+        let content = fs::read_to_string(package_json_path).await?;
         let package_json: PackageJson = serde_json::from_str(&content)?;
         Ok(package_json)
     }
