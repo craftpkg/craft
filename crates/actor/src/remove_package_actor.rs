@@ -1,5 +1,8 @@
+use std::path::{Component, Path, PathBuf};
+
 use contract::{Actor, Context, Result};
 use package::{DependencySection, ProjectManifest};
+use tokio::fs;
 
 #[derive(Debug)]
 pub struct RemoveActorPayload {
@@ -19,10 +22,12 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
     async fn run(&self) -> Result<()> {
         let node_modules = self.context.node_modules_dir();
 
-        // Remove packages from node_modules
         for package_name in &self.payload.packages {
-            let package_path = node_modules.join(package_name);
+            for bin_name in remove_bins(&node_modules, package_name).await? {
+                debug::info!("Removed bin {} of {}", bin_name, package_name);
+            }
 
+            let package_path = node_modules.join(package_name);
             if fsutil::remove_entry(&package_path).await? {
                 debug::info!("Removed {} from node_modules", package_name);
             } else {
@@ -38,12 +43,18 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
         let mut manifest = ProjectManifest::open(&package_json_path).await?;
         let mut is_changed = false;
         for package_name in &self.payload.packages {
+            let mut was_listed = false;
             for section in DependencySection::ALL {
                 if manifest.remove_dependency(section, package_name) {
                     debug::info!("Removed {} from {}", package_name, section.key());
-                    is_changed = true;
+                    was_listed = true;
                 }
             }
+
+            if !was_listed {
+                eprintln!("warning: {package_name} is not a dependency of this project");
+            }
+            is_changed |= was_listed;
         }
 
         if is_changed {
@@ -55,10 +66,48 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
     }
 }
 
+/// Removes the `.bin` links that point into the package, returning their names.
+async fn remove_bins(node_modules: &Path, package_name: &str) -> Result<Vec<String>> {
+    let bin_dir = node_modules.join(".bin");
+    let package_dir = node_modules.join(package_name);
+    let mut entries = match fs::read_dir(&bin_dir).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+
+    let mut removed = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        let Ok(target) = fs::read_link(entry.path()).await else {
+            continue;
+        };
+        let is_package_bin = normalize_lexically(&bin_dir.join(target)).starts_with(&package_dir);
+        if is_package_bin {
+            fsutil::remove_entry(&entry.path()).await?;
+            removed.push(entry.file_name().to_string_lossy().into_owned());
+        }
+    }
+    Ok(removed)
+}
+
+/// Resolves `.` and `..` without touching the filesystem, since the target may already be gone.
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other),
+        }
+    }
+    normalized
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::fs;
 
     #[tokio::test]
     async fn test_remove_package_actor_removes_from_node_modules() {
@@ -80,6 +129,45 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(!test_package.exists());
+    }
+
+    #[test]
+    fn test_normalize_lexically() {
+        assert_eq!(
+            normalize_lexically(Path::new("/app/node_modules/.bin/../cowsay/./cli.js")),
+            PathBuf::from("/app/node_modules/cowsay/cli.js")
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_removes_only_the_bins_of_the_removed_package() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let node_modules = temp_dir.path().join("node_modules");
+        let bin_dir = node_modules.join(".bin");
+        fs::create_dir_all(&bin_dir).await.unwrap();
+        fs::symlink("../cowsay/cli.js", bin_dir.join("cowsay"))
+            .await
+            .unwrap();
+        fs::symlink(
+            node_modules.join("@scope/cow/say.js"),
+            bin_dir.join("cowthink"),
+        )
+        .await
+        .unwrap();
+        fs::symlink("../cowsay-extra/cli.js", bin_dir.join("extra"))
+            .await
+            .unwrap();
+        fs::symlink("../@scope/cow/say.js", bin_dir.join("scoped"))
+            .await
+            .unwrap();
+
+        let mut removed = remove_bins(&node_modules, "cowsay").await.unwrap();
+        removed.extend(remove_bins(&node_modules, "@scope/cow").await.unwrap());
+        removed.sort();
+
+        assert_eq!(removed, ["cowsay", "cowthink", "scoped"]);
+        assert!(fs::symlink_metadata(bin_dir.join("extra")).await.is_ok());
     }
 
     #[tokio::test]
