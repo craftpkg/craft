@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 contract = { path = "../contract" }
 pipeline = { path = "../pipeline" }
+resolver = { path = "../resolver" }
 package = { path = "../package" }
 debug = { path = "../debug" }
 process = { path = "../process" }
