@@ -1,6 +1,6 @@
 use contract::{Actor, Context, Pipeline};
 use package::{InstallPackage, PackageJson};
-use pipeline::{InstallPipe, LinkerPipe};
+use pipeline::{InstallPipe, LinkerPipe, ResolvedRoot};
 
 #[derive(Debug)]
 pub struct AddActorPayload {
@@ -31,35 +31,26 @@ impl Actor<AddActorPayload> for AddPackageActor {
             pkgs.push(InstallPackage::from_literal(pkg, self.payload.is_dev));
         }
 
-        let artifacts = InstallPipe::new(&self.context, pkgs.clone()).run().await?;
+        let installation = InstallPipe::new(&self.context, pkgs).run().await?;
 
-        LinkerPipe::new(&self.context, artifacts.clone(), pkgs)
+        LinkerPipe::new(&self.context, installation.clone())
             .run()
             .await?;
 
         let package_json_path = self.context.package_json_path();
         let mut package_json = PackageJson::from_file(&package_json_path).await?;
 
-        // Add only the explicitly requested packages to dependencies or devDependencies
-        for pkg_name in &self.payload.packages {
-            // Find the corresponding artifact for this package
-            if let Some(artifact) = artifacts.iter().find(|a| &a.name == pkg_name) {
-                if self.payload.is_dev {
-                    // Add to devDependencies
-                    let dev_deps = package_json
-                        .dev_dependencies
-                        .get_or_insert_with(std::collections::HashMap::new);
-                    dev_deps.insert(artifact.name.clone(), format!("^{}", artifact.version));
-                    debug::info!("Added {} to devDependencies", artifact.name);
-                } else {
-                    // Add to dependencies
-                    let deps = package_json
-                        .dependencies
-                        .get_or_insert_with(std::collections::HashMap::new);
-                    deps.insert(artifact.name.clone(), format!("^{}", artifact.version));
-                    debug::info!("Added {} to dependencies", artifact.name);
-                }
-            }
+        let section = if self.payload.is_dev {
+            &mut package_json.dev_dependencies
+        } else {
+            &mut package_json.dependencies
+        };
+        let dependencies = section.get_or_insert_with(std::collections::HashMap::new);
+
+        for root in &installation.roots {
+            let saved_spec = saved_spec(root);
+            debug::info!("Saving {}@{}", root.package.name, saved_spec);
+            dependencies.insert(root.package.name.clone(), saved_spec);
         }
 
         // Write updated package.json
@@ -68,6 +59,17 @@ impl Actor<AddActorPayload> for AddPackageActor {
         debug::info!("Updated package.json");
 
         Ok(())
+    }
+}
+
+/// The spec written to package.json: a caret range on the resolved version, kept behind the
+/// `npm:` prefix when the package was added under an alias.
+fn saved_spec(root: &ResolvedRoot) -> String {
+    let is_alias = root.package.name != root.artifact.name;
+    if is_alias {
+        format!("npm:{}@^{}", root.artifact.name, root.artifact.version)
+    } else {
+        format!("^{}", root.artifact.version)
     }
 }
 
