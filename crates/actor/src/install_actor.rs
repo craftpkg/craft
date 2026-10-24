@@ -1,16 +1,18 @@
-use contract::{Actor, Pipeline, Result};
+use contract::{Actor, Context, Pipeline, Result};
 use package::{InstallPackage, PackageJson};
 use pipeline::{InstallPipe, LinkerPipe};
 
-pub struct InstallActor;
+pub struct InstallActor {
+    context: Context,
+}
 
 impl Actor<()> for InstallActor {
-    fn with(_: ()) -> Self {
-        Self
+    fn with(context: Context, _: ()) -> Self {
+        Self { context }
     }
 
     async fn run(&self) -> Result<()> {
-        let package_json = PackageJson::from_file().await?;
+        let package_json = PackageJson::from_file(&self.context.package_json_path()).await?;
 
         // Collect all dependencies
         let mut pkgs = Vec::new();
@@ -30,8 +32,10 @@ impl Actor<()> for InstallActor {
         debug::trace!("Installing packages from package.json: {pkgs:?}");
 
         // Run install and link pipes
-        let artifacts = InstallPipe::new(pkgs.clone()).run().await?;
-        LinkerPipe::new(artifacts, pkgs).run().await?;
+        let artifacts = InstallPipe::new(&self.context, pkgs.clone()).run().await?;
+        LinkerPipe::new(&self.context, artifacts, pkgs)
+            .run()
+            .await?;
 
         Ok(())
     }
@@ -40,14 +44,17 @@ impl Actor<()> for InstallActor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
     #[tokio::test]
     async fn test_install_actor_no_package_json() {
         let temp_dir = tempfile::tempdir().unwrap();
-        env::set_current_dir(&temp_dir).unwrap();
+        let context = Context::new(
+            temp_dir.path().to_path_buf(),
+            temp_dir.path().join(".craft"),
+            false,
+        );
 
-        let actor = InstallActor::with(());
+        let actor = InstallActor::with(context, ());
         let result = actor.run().await;
 
         assert!(result.is_err());
@@ -56,7 +63,8 @@ mod tests {
 
     #[test]
     fn test_install_actor_creation() {
-        let actor = InstallActor::with(());
+        let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false);
+        let actor = InstallActor::with(context, ());
         // Just verify it can be created
         drop(actor);
     }
