@@ -1028,6 +1028,7 @@ dependencies = [
  "contract",
  "reqwest",
  "serde",
+ "tempfile",
  "tokio",
 ]
 
