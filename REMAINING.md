@@ -72,7 +72,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 5.2 | Memoize packument fetches per package name | P2 | [x] |
 | 5.3 | Global concurrency limits | P2 | [x] |
 | 5.4 | Timeouts, retries, User-Agent | P2 | [x] |
-| 5.5 | Streaming downloads (hash while writing) | P2 | [ ] |
+| 5.5 | Streaming downloads (hash while writing) | P2 | [x] |
 | 5.6 | Metadata disk cache (ETag / 304) | P2 | [ ] |
 | 5.7 | Registry configuration (`.npmrc`, scopes, auth) | P1 | [x] |
 | **Phase 6 — CLI & UX** | | | |
@@ -658,7 +658,9 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 - Retry idempotent requests on connect errors / 429 / 5xx with exponential backoff + jitter (3 attempts), honouring `Retry-After`.
 - Upgrade `reqwest` 0.11 → 0.12; consider `rustls-tls` to avoid OpenSSL in release builds.
 
-### 5.5 Streaming downloads · P2
+### 5.5 Streaming downloads · P2 — ✔ done
+
+> Done: `Network::download` streams the body chunk by chunk into a temp file beside the destination while an incremental `IntegrityHasher` checks it, and renames the file into place only after the hash matches; a retry starts a fresh temp file and a failure or mismatch leaves nothing behind. Request permits are held until the body is fully read. Measured installing `next` + React + TypeScript from a lockfile into an empty store: peak RSS 197 MB → 21 MB, same wall time. Extraction still reads the downloaded file rather than the stream.
 
 - `response.bytes()` buffers whole tarballs in memory (`network.rs:30`). Stream chunks to the temp file while updating the integrity hasher (1.7); or stream straight into `GzDecoder` + `tar` and extract without writing the `.tgz`.
 
