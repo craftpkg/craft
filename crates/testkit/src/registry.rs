@@ -100,6 +100,13 @@ impl MockRegistry {
         self
     }
 
+    /// Leaves the version in the packument but makes its tarball URL return 404.
+    pub fn remove_tarball(&self, name: &str, version: &str) -> &Self {
+        let tarball_path = format!("/{name}/-/{}-{version}.tgz", unscoped_name(name));
+        lock(&self.state).tarballs.remove(&tarball_path);
+        self
+    }
+
     /// Every request path received so far, in order, with `%2f`-encoded scopes decoded.
     pub fn requested_paths(&self) -> Vec<String> {
         lock(&self.state).requested_paths.clone()
