@@ -150,3 +150,111 @@ fn drops_removed_dependencies_and_what_only_they_needed() {
     assert_eq!(packages, ["react@19.2.0"]);
     assert_eq!(registry.requested_paths().len(), requests_before);
 }
+
+fn metadata_requests(registry: &MockRegistry) -> Vec<String> {
+    registry
+        .requested_paths()
+        .into_iter()
+        .filter(|path| !path.ends_with(".tgz"))
+        .collect()
+}
+
+#[test]
+fn skips_an_install_that_is_already_up_to_date() {
+    let registry = MockRegistry::start();
+    publish_react_stack(&registry);
+    let project = Project::new(&registry, json!({ "dependencies": { "debug": "^4.0.0" } }));
+    project.craft().arg("install").assert().success();
+    let requests_before = registry.requested_paths().len();
+
+    project
+        .craft()
+        .arg("install")
+        .assert()
+        .success()
+        .stdout("Already up to date\n");
+
+    assert_eq!(registry.requested_paths().len(), requests_before);
+}
+
+#[test]
+fn installs_a_fresh_checkout_without_registry_metadata() {
+    let registry = MockRegistry::start();
+    publish_react_stack(&registry);
+    let package_json =
+        json!({ "dependencies": { "debug": "^4.0.0", "ui": "^1.0.0", "react": "^19.0.0" } });
+    let original = Project::new(&registry, package_json.clone());
+    original.craft().arg("install").assert().success();
+    let lock = original.read_file("craft.lock");
+
+    let checkout = Project::new(&registry, package_json);
+    checkout.write_file("craft.lock", &lock);
+    let metadata_before = metadata_requests(&registry).len();
+    checkout.craft().arg("install").assert().success();
+
+    assert_eq!(metadata_requests(&registry).len(), metadata_before);
+    assert_eq!(checkout.read_file("craft.lock"), lock);
+    let debug = checkout.require("debug").expect("debug loads");
+    assert_eq!(debug["dependencies"]["ms"], "2.1.3");
+}
+
+#[test]
+fn keeps_locked_versions_when_newer_ones_are_published() {
+    let registry = MockRegistry::start();
+    publish_react_stack(&registry);
+    let project = Project::new(&registry, json!({ "dependencies": { "debug": "^4.0.0" } }));
+    project.craft().arg("install").assert().success();
+
+    registry
+        .publish(PackageFixture::new("ms", "2.1.4"))
+        .publish(PackageFixture::new("debug", "4.4.1").dependency("ms", "^2.1.3"));
+    std::fs::remove_dir_all(project.path().join("node_modules")).expect("remove node_modules");
+    project.craft().arg("install").assert().success();
+
+    let debug = project.require("debug").expect("debug loads");
+    assert_eq!(debug["version"], "4.4.0");
+    assert_eq!(debug["dependencies"]["ms"], "2.1.3");
+}
+
+#[test]
+fn re_resolves_only_dependencies_whose_specifier_changed() {
+    let registry = MockRegistry::start();
+    publish_react_stack(&registry);
+    registry.publish(PackageFixture::new("react", "18.3.1"));
+    registry.set_dist_tag("react", "latest", "19.2.0");
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "debug": "^4.0.0", "react": "^19.0.0" } }),
+    );
+    project.craft().arg("install").assert().success();
+    let metadata_before = metadata_requests(&registry).len();
+
+    project.write_file(
+        "package.json",
+        &json!({ "dependencies": { "debug": "^4.0.0", "react": "^18.0.0" } }).to_string(),
+    );
+    project.craft().arg("install").assert().success();
+
+    let new_requests: Vec<String> = metadata_requests(&registry)[metadata_before..].to_vec();
+    assert_eq!(new_requests, ["/react"]);
+    assert_eq!(project.required_version("react"), Ok("18.3.1".to_string()));
+    assert_eq!(
+        lockfile(&project)["importers"]["."]["dependencies"]["react"],
+        json!({ "specifier": "^18.0.0", "version": "react@18.3.1" })
+    );
+}
+
+#[test]
+fn craft_add_resolves_the_added_package_afresh() {
+    let registry = MockRegistry::start();
+    publish_react_stack(&registry);
+    let project = Project::new(&registry, json!({ "dependencies": { "debug": "^4.0.0" } }));
+    project.craft().arg("install").assert().success();
+    registry.publish(PackageFixture::new("ms", "2.1.4"));
+
+    project.craft().args(["add", "ms"]).assert().success();
+
+    assert_eq!(project.package_json()["dependencies"]["ms"], "^2.1.4");
+    let debug = project.require("debug").expect("debug loads");
+    assert_eq!(debug["dependencies"]["ms"], "2.1.3");
+}
