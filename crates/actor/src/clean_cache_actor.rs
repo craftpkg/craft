@@ -24,7 +24,9 @@ impl Actor<CleanCacheActorPayload> for CleanCacheActor {
 
         let store_dir = self.context.store_dir();
         let legacy_cache_dir = self.context.legacy_cache_dir();
-        let has_cache = store_dir.exists() || legacy_cache_dir.exists();
+        let metadata_cache_dir = self.context.metadata_cache_dir();
+        let has_cache =
+            store_dir.exists() || legacy_cache_dir.exists() || metadata_cache_dir.exists();
         if !has_cache {
             debug::info!("Store directory does not exist: {:?}", store_dir);
             return Ok(());
@@ -34,6 +36,7 @@ impl Actor<CleanCacheActorPayload> for CleanCacheActor {
 
         fsutil::remove_entry(&store_dir).await?;
         fsutil::remove_entry(&legacy_cache_dir).await?;
+        fsutil::remove_entry(&metadata_cache_dir).await?;
         tokio::fs::create_dir_all(&store_dir).await?;
         println!("✓ Cleaned all package cache");
 
