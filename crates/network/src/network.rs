@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -104,7 +105,9 @@ impl Network {
                 self.stream_to_temp_file(from_url, &dir, integrity)
             })
             .await?;
-        temp_path.persist(&store_path)?;
+        temp_path
+            .persist(&store_path)
+            .with_context(|| format!("could not save {}", store_path.display()))?;
         Ok(())
     }
 
@@ -163,7 +166,7 @@ impl Network {
             };
             let may_retry = failure.is_retryable && attempt < self.registry.fetch_retries;
             if !may_retry {
-                return Err(failure.error);
+                return Err(failure.into_error(url));
             }
 
             let delay = retry_delay(attempt, failure.retry_after);
@@ -211,6 +214,7 @@ impl Network {
                 .into(),
                 is_retryable: is_retryable_status(status.as_u16()),
                 retry_after,
+                is_unreachable: false,
             });
         }
         Ok(PermittedResponse {
@@ -280,6 +284,8 @@ struct Failure {
     error: anyhow::Error,
     is_retryable: bool,
     retry_after: Option<Duration>,
+    /// The request never got a response: no connection, or it timed out.
+    is_unreachable: bool,
 }
 
 impl Failure {
@@ -288,17 +294,37 @@ impl Failure {
             error: error.into(),
             is_retryable: false,
             retry_after: None,
+            is_unreachable: false,
         }
     }
 
     fn from_transport(error: reqwest::Error) -> Self {
-        let is_retryable =
-            error.is_connect() || error.is_timeout() || error.is_body() || error.is_request();
+        let is_unreachable = error.is_connect() || error.is_timeout();
+        let is_retryable = is_unreachable || error.is_body() || error.is_request();
         Self {
             error: error.into(),
             is_retryable,
             retry_after: None,
+            is_unreachable,
         }
+    }
+
+    /// The error to report once retries are exhausted, saying what to try when the registry
+    /// could not be reached at all.
+    fn into_error(self, url: &str) -> anyhow::Error {
+        if !self.is_unreachable {
+            return self.error;
+        }
+        let host = url
+            .split_once("://")
+            .map_or(url, |(_, rest)| rest)
+            .split('/')
+            .next()
+            .unwrap_or(url);
+        let reason = self.error.root_cause();
+        anyhow::anyhow!(
+            "could not reach {host} ({reason}); check your network connection and proxy settings, or use --offline"
+        )
     }
 }
 
