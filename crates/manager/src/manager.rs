@@ -1,8 +1,8 @@
 use actor::{
-    AddActorPayload, AddPackageActor, CleanCacheActor, CleanCacheActorPayload, InitActor,
-    InspectActor, InspectPayload, InstallActor, InstallOptions, ListScriptsActor, OutdatedActor,
-    RemoveActorPayload, RemovePackageActor, RunScriptActor, RunScriptActorPayload, TrustActor,
-    UpdateActor, UpdatePayload,
+    AddActorPayload, AddPackageActor, CleanCacheActor, CleanCacheActorPayload, DlxActor,
+    DlxPayload, InitActor, InspectActor, InspectPayload, InstallActor, InstallOptions,
+    ListScriptsActor, OutdatedActor, RemoveActorPayload, RemovePackageActor, RunScriptActor,
+    RunScriptActorPayload, TrustActor, UpdateActor, UpdatePayload,
 };
 use cli::{Action, CacheCommands};
 use contract::{Actor, Context};
@@ -48,14 +48,37 @@ impl CraftManager {
                     .await
             }
             Action::Run { script, args } => {
-                RunScriptActor::with(context, RunScriptActorPayload { script, args })
-                    .run()
-                    .await
+                let payload = RunScriptActorPayload {
+                    script,
+                    args,
+                    bin_only: false,
+                };
+                RunScriptActor::with(context, payload).run().await
             }
             Action::ListScripts => ListScriptsActor::with(context, ()).run().await,
             Action::Init => InitActor::with(context, ()).run().await,
             Action::Trust { packages } => TrustActor::with(context, packages).run().await,
             Action::Outdated => OutdatedActor::with(context, ()).run().await,
+            Action::Exec { command, args } => {
+                let payload = RunScriptActorPayload {
+                    script: command,
+                    args,
+                    bin_only: true,
+                };
+                RunScriptActor::with(context, payload).run().await
+            }
+            Action::Dlx {
+                package,
+                command,
+                args,
+            } => {
+                let payload = DlxPayload {
+                    package,
+                    command,
+                    args,
+                };
+                DlxActor::with(context, payload).run().await
+            }
             Action::Update { packages, latest } => {
                 UpdateActor::with(context, UpdatePayload { packages, latest })
                     .run()
