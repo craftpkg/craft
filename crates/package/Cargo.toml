@@ -7,6 +7,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+fsutil = { path = "../fsutil" }
 anyhow = "1.0"
 contract = { path = "../contract" }
 node-semver = "2.0"
