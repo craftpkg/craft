@@ -1,6 +1,5 @@
 use contract::{Actor, Context, Result};
-use package::PackageJson;
-use tokio::fs;
+use package::{DependencySection, ProjectManifest};
 
 #[derive(Debug)]
 pub struct RemoveActorPayload {
@@ -31,34 +30,24 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
             }
         }
 
-        // Update package.json if it exists
         let package_json_path = self.context.package_json_path();
+        if !package_json_path.exists() {
+            return Ok(());
+        }
 
-        if package_json_path.exists() {
-            let content = fs::read_to_string(&package_json_path).await?;
-            let mut package_json: PackageJson = serde_json::from_str(&content)?;
-
-            // Remove from dependencies
-            if let Some(deps) = &mut package_json.dependencies {
-                for package_name in &self.payload.packages {
-                    if deps.remove(package_name).is_some() {
-                        debug::info!("Removed {} from dependencies", package_name);
-                    }
+        let mut manifest = ProjectManifest::open(&package_json_path).await?;
+        let mut is_changed = false;
+        for package_name in &self.payload.packages {
+            for section in DependencySection::ALL {
+                if manifest.remove_dependency(section, package_name) {
+                    debug::info!("Removed {} from {}", package_name, section.key());
+                    is_changed = true;
                 }
             }
+        }
 
-            // Remove from devDependencies
-            if let Some(dev_deps) = &mut package_json.dev_dependencies {
-                for package_name in &self.payload.packages {
-                    if dev_deps.remove(package_name).is_some() {
-                        debug::info!("Removed {} from devDependencies", package_name);
-                    }
-                }
-            }
-
-            // Write updated package.json
-            let updated_content = serde_json::to_string_pretty(&package_json)?;
-            fs::write(&package_json_path, updated_content).await?;
+        if is_changed {
+            manifest.save().await?;
             debug::info!("Updated package.json");
         }
 
@@ -69,6 +58,7 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::fs;
 
     #[tokio::test]
     async fn test_remove_package_actor_removes_from_node_modules() {
@@ -132,9 +122,8 @@ mod tests {
         assert!(!deps.contains_key("react"));
         assert!(deps.contains_key("lodash"));
 
-        // Verify typescript was removed from devDependencies
-        let dev_deps = package_json["devDependencies"].as_object().unwrap();
-        assert!(!dev_deps.contains_key("typescript"));
+        // Verify the emptied devDependencies section was removed
+        assert!(package_json.get("devDependencies").is_none());
     }
 
     #[tokio::test]
