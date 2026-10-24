@@ -8,8 +8,8 @@ use sha2::{Digest, Sha256};
 
 use crate::NodeId;
 
-/// Hex characters of the source hash used in cache directory names.
-const SOURCE_HASH_LENGTH: usize = 16;
+/// Hex characters of the source hash used in store entry names.
+const SOURCE_HASH_LENGTH: usize = 12;
 
 #[derive(Debug, Clone)]
 pub struct ResolvedArtifact {
@@ -26,15 +26,15 @@ pub enum ArtifactSource {
     Registry {
         tarball_url: String,
     },
-    /// A tarball URL dependency, extracted into the cache by its content hash.
+    /// A tarball URL dependency, extracted into the store by its content hash.
     Tarball {
         url: String,
     },
-    /// A `file:` tarball, extracted into the cache by its content hash.
+    /// A `file:` tarball, extracted into the store by its content hash.
     LocalTarball {
         path: PathBuf,
     },
-    /// A `file:` directory, copied into the cache on every install.
+    /// A `file:` directory, copied into the store on every install.
     Directory {
         path: PathBuf,
     },
@@ -42,7 +42,7 @@ pub enum ArtifactSource {
     Link {
         path: PathBuf,
     },
-    /// A git repository pinned to a commit, cached by repository and commit.
+    /// A git repository pinned to a commit, stored by repository and commit.
     Git {
         url: String,
         sha: String,
@@ -72,20 +72,33 @@ impl ResolvedArtifact {
         }
     }
 
-    /// The directory holding the package's files, which dependents link to.
+    /// The directory holding the package's files: its store entry, or the target of a link.
+    /// Registry entries are named `<name>@<version>-<hash>` so the store stays readable, with
+    /// the hash of the integrity keeping same-named versions from different registries apart.
     pub fn package_dir(&self, context: &Context) -> PathBuf {
         match &self.source {
-            ArtifactSource::Registry { .. } => context.package_dir(&self.name, &self.version),
+            ArtifactSource::Registry { tarball_url } => {
+                let key = self
+                    .integrity
+                    .as_ref()
+                    .map_or_else(|| tarball_url.clone(), Integrity::to_string);
+                let escaped_name = self.name.replace('/', "+");
+                context.store_dir().join(format!(
+                    "{escaped_name}@{}-{}",
+                    self.version,
+                    source_hash(&key)
+                ))
+            }
             ArtifactSource::Link { path } => path.clone(),
             ArtifactSource::Tarball { .. } | ArtifactSource::LocalTarball { .. } => {
                 let key = self
                     .integrity
                     .as_ref()
                     .map_or_else(|| self.node_id().to_string(), Integrity::to_string);
-                source_cache_dir(context, "tarball", &key)
+                store_entry(context, "tarball", &key)
             }
             ArtifactSource::Directory { path } => {
-                source_cache_dir(context, "file", &path.display().to_string())
+                store_entry(context, "file", &path.display().to_string())
             }
             ArtifactSource::Git { url, sha } => git_package_dir(context, url, sha),
         }
@@ -105,20 +118,20 @@ pub(crate) fn source_hash(key: &str) -> String {
 }
 
 pub(crate) fn git_package_dir(context: &Context, url: &str, sha: &str) -> PathBuf {
-    source_cache_dir(context, "git", &format!("{url}#{sha}"))
+    store_entry(context, "git", &format!("{url}#{sha}"))
 }
 
 /// Named by source rather than package, since a tarball's name is only known once extracted.
-pub(crate) fn source_cache_dir(context: &Context, kind: &str, key: &str) -> PathBuf {
+pub(crate) fn store_entry(context: &Context, kind: &str, key: &str) -> PathBuf {
     context
-        .package_cache_dir()
+        .store_dir()
         .join(format!("{kind}-{}", source_hash(key)))
-        .join("package")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn artifact(source: ArtifactSource) -> ResolvedArtifact {
         ResolvedArtifact {
@@ -171,8 +184,38 @@ mod tests {
             PathBuf::from("/app/libs/local-lib")
         );
         let directory_dir = directory.package_dir(&context);
-        assert!(directory_dir.starts_with("/home/me/.craft/packages"));
-        assert!(directory_dir.ends_with("package"));
+        assert_eq!(
+            directory_dir.parent().unwrap(),
+            Path::new("/home/me/.craft/store/v1")
+        );
+        assert!(
+            directory_dir
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("file-")
+        );
         assert_ne!(directory_dir, other_directory.package_dir(&context));
+
+        let registry = ResolvedArtifact {
+            name: "@types/node".to_string(),
+            version: "22.20.5".to_string(),
+            source: ArtifactSource::Registry {
+                tarball_url: "https://registry.test/node.tgz".to_string(),
+            },
+            integrity: Some(Integrity::sha512_of(b"node")),
+            package: None,
+        };
+        let entry = registry.package_dir(&context);
+        let entry_name = entry.file_name().unwrap().to_string_lossy();
+        assert_eq!(
+            entry.parent().unwrap(),
+            Path::new("/home/me/.craft/store/v1")
+        );
+        assert!(entry_name.starts_with("@types+node@22.20.5-"));
+        assert_eq!(
+            entry_name.len(),
+            "@types+node@22.20.5-".len() + SOURCE_HASH_LENGTH
+        );
     }
 }
