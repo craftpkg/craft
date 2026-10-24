@@ -26,6 +26,7 @@ struct MockResponse {
     status: u16,
     content_type: &'static str,
     body: Vec<u8>,
+    retry_after: Option<u64>,
 }
 
 #[derive(Default)]
@@ -36,6 +37,9 @@ struct RegistryState {
     /// When set, every request must carry `Authorization: Bearer <token>`.
     required_token: Option<String>,
     authorizations: Vec<Option<String>>,
+    user_agents: Vec<Option<String>>,
+    /// Requests left to fail, with the status and `Retry-After` to fail them with.
+    pending_failures: Option<(usize, u16, Option<u64>)>,
 }
 
 impl MockRegistry {
@@ -129,6 +133,17 @@ impl MockRegistry {
         self
     }
 
+    /// Fails the next `count` requests with `status`, sending `Retry-After: <seconds>` if given.
+    pub fn fail_next(&self, count: usize, status: u16, retry_after: Option<u64>) -> &Self {
+        lock(&self.state).pending_failures = Some((count, status, retry_after));
+        self
+    }
+
+    /// The `User-Agent` header of every request so far, in order.
+    pub fn user_agents(&self) -> Vec<Option<String>> {
+        lock(&self.state).user_agents.clone()
+    }
+
     /// The `Authorization` header of every request so far, in order.
     pub fn authorizations(&self) -> Vec<Option<String>> {
         lock(&self.state).authorizations.clone()
@@ -151,7 +166,25 @@ impl Drop for MockRegistry {
 }
 
 impl RegistryState {
-    fn respond_authorized(&mut self, url: &str, authorization: Option<String>) -> MockResponse {
+    fn respond_authorized(
+        &mut self,
+        url: &str,
+        authorization: Option<String>,
+        user_agent: Option<String>,
+    ) -> MockResponse {
+        self.user_agents.push(user_agent);
+        if let Some((remaining, status, retry_after)) = self.pending_failures.take() {
+            if remaining > 1 {
+                self.pending_failures = Some((remaining - 1, status, retry_after));
+            }
+            self.requested_paths.push(decode_path(url));
+            return MockResponse {
+                status,
+                content_type: "application/json",
+                body: br#"{"error":"Temporarily unavailable"}"#.to_vec(),
+                retry_after,
+            };
+        }
         let expected = self
             .required_token
             .as_ref()
@@ -164,6 +197,7 @@ impl RegistryState {
                 status: 401,
                 content_type: "application/json",
                 body: br#"{"error":"Unauthorized"}"#.to_vec(),
+                retry_after: None,
             };
         }
         self.respond(url)
@@ -178,6 +212,7 @@ impl RegistryState {
                 status: 200,
                 content_type: "application/octet-stream",
                 body: tarball.clone(),
+                retry_after: None,
             };
         }
 
@@ -186,11 +221,13 @@ impl RegistryState {
                 status: 200,
                 content_type: "application/json",
                 body: packument.to_string().into_bytes(),
+                retry_after: None,
             },
             None => MockResponse {
                 status: 404,
                 content_type: "application/json",
                 body: br#"{"error":"Not found"}"#.to_vec(),
+                retry_after: None,
             },
         }
     }
@@ -235,6 +272,7 @@ fn serve(stream: &TcpStream, state: &Mutex<RegistryState>) {
     }
     let mut header_line = String::new();
     let mut authorization = None;
+    let mut user_agent = None;
     loop {
         header_line.clear();
         let is_end_of_headers = matches!(reader.read_line(&mut header_line), Ok(0) | Err(_))
@@ -242,22 +280,31 @@ fn serve(stream: &TcpStream, state: &Mutex<RegistryState>) {
         if is_end_of_headers {
             break;
         }
-        if let Some((name, value)) = header_line.split_once(':')
-            && name.trim().eq_ignore_ascii_case("authorization")
-        {
-            authorization = Some(value.trim().to_string());
+        if let Some((name, value)) = header_line.split_once(':') {
+            let name = name.trim();
+            if name.eq_ignore_ascii_case("authorization") {
+                authorization = Some(value.trim().to_string());
+            } else if name.eq_ignore_ascii_case("user-agent") {
+                user_agent = Some(value.trim().to_string());
+            }
         }
     }
 
     let path = request_line.split_whitespace().nth(1).unwrap_or("/");
-    let response = lock(state).respond_authorized(path, authorization);
+    let response = lock(state).respond_authorized(path, authorization, user_agent);
     let reason = match response.status {
         200 => "OK",
         401 => "Unauthorized",
-        _ => "Not Found",
+        404 => "Not Found",
+        429 => "Too Many Requests",
+        _ => "Service Unavailable",
     };
+    let retry_after = response
+        .retry_after
+        .map(|seconds| format!("Retry-After: {seconds}\r\n"))
+        .unwrap_or_default();
     let head = format!(
-        "HTTP/1.1 {} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{retry_after}Connection: close\r\n\r\n",
         response.status,
         response.content_type,
         response.body.len()
