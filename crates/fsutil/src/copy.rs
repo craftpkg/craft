@@ -3,7 +3,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
-use crate::remove_entry;
+use crate::context::PathContext;
+use crate::links::remove_entry_inner;
 
 static STAGING_COUNTER: AtomicUsize = AtomicUsize::new(0);
 /// The cheapest method that has worked so far this process; once cloning or hardlinking fails
@@ -34,6 +35,12 @@ enum Import {
 /// first, its copy is kept. Without `allow_hardlinks`, files are cloned or copied, for packages
 /// whose install scripts will write to them.
 pub async fn import_dir(source: &Path, dest: &Path, allow_hardlinks: bool) -> io::Result<()> {
+    import_dir_inner(source, dest, allow_hardlinks)
+        .await
+        .at("import into", dest)
+}
+
+async fn import_dir_inner(source: &Path, dest: &Path, allow_hardlinks: bool) -> io::Result<()> {
     if dest.exists() {
         return Ok(());
     }
@@ -46,9 +53,9 @@ pub async fn import_dir(source: &Path, dest: &Path, allow_hardlinks: bool) -> io
 
     match tokio::fs::rename(&staging, dest).await {
         Ok(()) => Ok(()),
-        Err(_) if dest.exists() => remove_entry(&staging).await.map(|_| ()),
+        Err(_) if dest.exists() => remove_entry_inner(&staging).await.map(|_| ()),
         Err(error) => {
-            remove_entry(&staging).await?;
+            remove_entry_inner(&staging).await?;
             Err(error)
         }
     }
@@ -57,8 +64,14 @@ pub async fn import_dir(source: &Path, dest: &Path, allow_hardlinks: bool) -> io
 /// Replaces `dest` with a fresh copy of the directory `source`, skipping top-level entries named
 /// in `excluded`. The copy is staged beside `dest` and swapped in, so `dest` is never partial.
 pub async fn replace_with_copy(source: &Path, dest: &Path, excluded: &[&str]) -> io::Result<()> {
+    replace_with_copy_inner(source, dest, excluded)
+        .await
+        .at("copy into", dest)
+}
+
+async fn replace_with_copy_inner(source: &Path, dest: &Path, excluded: &[&str]) -> io::Result<()> {
     let staging = stage(source, dest, excluded, Import::FromSource).await?;
-    remove_entry(dest).await?;
+    remove_entry_inner(dest).await?;
     tokio::fs::rename(&staging, dest).await
 }
 
@@ -85,7 +98,7 @@ async fn stage(
     .map_err(io::Error::other)?;
 
     if let Err(error) = copied {
-        remove_entry(&staging).await?;
+        remove_entry_inner(&staging).await?;
         return Err(error);
     }
     Ok(staging)
