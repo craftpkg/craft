@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use resolver::{ArtifactSource, NodeId, ResolvedArtifact, short_hash};
 
-const VIRTUAL_STORE_DIR: &str = ".craft";
+pub(crate) const VIRTUAL_STORE_DIR: &str = ".craft";
+/// The hidden hoisting directory inside the virtual store; never a package entry itself.
+pub(crate) const HOIST_DIR: &str = "node_modules";
 /// Longer entry names are truncated and suffixed with a hash, as pnpm does, to stay well under
 /// filesystem name limits.
 const MAX_ENTRY_NAME_LENGTH: usize = 120;
@@ -23,7 +25,7 @@ impl VirtualStore {
     /// `node_modules/.craft/node_modules`, where every package name is hoisted once. Node's
     /// lookup from inside the virtual store reaches it, so undeclared requires still resolve.
     pub fn hoist_dir(&self) -> PathBuf {
-        self.root.join("node_modules")
+        self.root.join(HOIST_DIR)
     }
 
     /// `node_modules/.craft/<entry>/node_modules`: the package and the links to its
