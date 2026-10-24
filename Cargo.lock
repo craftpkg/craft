@@ -1140,6 +1140,7 @@ dependencies = [
 name = "package"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "contract",
  "node-semver",
  "serde",
@@ -1383,10 +1384,14 @@ dependencies = [
  "anyhow",
  "contract",
  "debug",
+ "fsutil",
  "network",
  "node-semver",
  "package",
  "serde_json",
+ "sha2",
+ "tarball",
+ "tempfile",
  "tokio",
 ]
 
