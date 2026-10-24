@@ -1,6 +1,7 @@
 mod bins;
 pub mod install_pipe;
 pub mod linker_pipe;
+mod peers;
 mod prune;
 mod virtual_store;
 
