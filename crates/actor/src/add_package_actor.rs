@@ -1,9 +1,11 @@
 use contract::{Actor, Context, Pipeline};
+use lockfile::Lockfile;
 use package::{DependencySection, InstallPackage, PackageJson, ProjectManifest};
 use pipeline::{InstallPipe, LinkerPipe};
 use resolver::{ArtifactSource, Edge, ResolvedArtifact};
 
-use crate::install_actor::{manifest_packages, manifest_specifiers, save_lockfile};
+use crate::install_actor::{manifest_packages, manifest_specifiers};
+use crate::lock_state::{save_lockfile, with_lock_preference};
 
 #[derive(Debug)]
 pub struct AddActorPayload {
@@ -35,19 +37,24 @@ impl Actor<AddActorPayload> for AddPackageActor {
         let mut manifest = ProjectManifest::open(&package_json_path).await?;
         let package_json = PackageJson::from_file(&package_json_path).await?;
 
+        let lockfile = Lockfile::load(&self.context.cwd).await?;
         let added: Vec<InstallPackage> = self
             .payload
             .packages
             .iter()
-            .map(|literal| InstallPackage::from_literal(literal, self.payload.is_dev))
+            .map(|literal| {
+                InstallPackage::from_literal(literal, self.payload.is_dev).without_lock()
+            })
             .collect();
         let existing: Vec<InstallPackage> = manifest_packages(&package_json)
             .into_iter()
             .filter(|package| !added.iter().any(|added| added.name == package.name))
+            .map(|package| with_lock_preference(lockfile.as_ref(), package))
             .collect();
         let existing_count = existing.len();
 
         let mut graph = InstallPipe::new(&self.context, [existing, added].concat())
+            .with_lockfile(lockfile.as_ref())
             .run()
             .await?;
         let added_roots = graph.roots.split_off(existing_count);
