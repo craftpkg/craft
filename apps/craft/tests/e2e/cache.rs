@@ -147,3 +147,21 @@ fn cache_clean_removes_cached_metadata() {
 
     assert!(!metadata_dir.exists());
 }
+
+#[test]
+fn cache_clean_keeps_everything_without_force() {
+    let registry = MockRegistry::start();
+    publish_debug(&registry);
+    let project = Project::new(&registry, json!({ "dependencies": { "debug": "^4.0.0" } }));
+    project.craft().arg("install").assert().success();
+
+    project
+        .craft()
+        .args(["cache", "clean"])
+        .assert()
+        .success()
+        .stdout(contains("--force"));
+
+    assert!(project.craft_home().join("cache/metadata").exists());
+    assert!(!project.store_entries().is_empty());
+}
