@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use lockfile::{LockedSource, Lockfile};
 use network::Integrity;
 use node_semver::Version;
-use package::VersionRequirement;
+use package::{PlatformConstraints, VersionRequirement};
 
 use crate::git::GitSpec;
 use crate::{ArtifactSource, ResolvedArtifact};
@@ -21,6 +21,7 @@ struct LockedVersion {
     version: Version,
     tarball: String,
     integrity: Option<String>,
+    platform: PlatformConstraints,
 }
 
 impl LockPreferences {
@@ -42,6 +43,11 @@ impl LockPreferences {
                             version,
                             tarball: tarball.clone(),
                             integrity: integrity.clone(),
+                            platform: PlatformConstraints {
+                                os: package.os.clone(),
+                                cpu: package.cpu.clone(),
+                                libc: package.libc.clone(),
+                            },
                         });
                     }
                 }
@@ -83,6 +89,7 @@ impl LockPreferences {
                 .as_deref()
                 .and_then(|integrity| Integrity::parse(integrity).ok()),
             package: None,
+            platform: locked.platform.clone(),
         })
     }
 
@@ -101,19 +108,16 @@ impl LockPreferences {
 mod tests {
     use super::*;
     use lockfile::LockedPackage;
-    use std::collections::BTreeMap;
 
     fn registry_package(name: &str, version: &str) -> LockedPackage {
-        LockedPackage {
-            name: name.to_string(),
-            version: version.to_string(),
-            resolution: LockedSource::Registry {
+        LockedPackage::new(
+            name,
+            version,
+            LockedSource::Registry {
                 tarball: format!("https://registry.test/{name}-{version}.tgz"),
                 integrity: None,
             },
-            dependencies: BTreeMap::new(),
-            peer_dependencies: BTreeMap::new(),
-        }
+        )
     }
 
     fn preferences() -> LockPreferences {
