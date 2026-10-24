@@ -625,7 +625,6 @@ fn concurrent_installs_sharing_a_craft_home_succeed() {
 }
 
 #[test]
-#[ignore = "fixed by 4.1/4.2: optional platform-specific dependencies are skipped"]
 fn installs_optional_dependencies_matching_the_host_platform() {
     let host = format!("{}-{}", node_platform(), node_arch());
     let registry = MockRegistry::start();
