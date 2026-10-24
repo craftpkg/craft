@@ -80,7 +80,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 6.2 | Error reporting (no panics, contextual messages) | P2 | [x] |
 | 6.3 | Missing commands and flags | P2 | [x] |
 | 6.4 | Windows support (shims, junctions) | P2 | [ ] |
-| 6.5 | Release & docs accuracy | P2 | [ ] |
+| 6.5 | Release & docs accuracy | P2 | [x] |
 | **Phase 7 — Later** | | | |
 | 7.x | Workspaces, `package-lock.json` import, overrides, `dlx`, global installs | — | [ ] |
 
@@ -719,7 +719,11 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 - `PATH` separator and `Path`/`PATH` casing in 1.12; `cmd /C` quoting.
 - Add `windows-latest` to the CI matrix (deferred from 0.4) once the e2e suite passes there.
 
-### 6.5 Release & docs accuracy · P2
+### 6.5 Release & docs accuracy · P2 — ✔ done
+
+> Done: the release workflow builds `aarch64-unknown-linux-gnu` (native arm64 runner) and static `x86_64`/`aarch64-unknown-linux-musl`, and publishes a `<asset>.sha256` beside every binary. reqwest now uses rustls with the OS's root certificates instead of OpenSSL, so musl builds need no system libraries (npm and JSR installs re-verified over HTTPS). `install.sh` picks the musl build on musl systems, verifies the checksum (refuses a mismatch, warns when a release has none), installs to `/usr/local/bin` when writable or `~/.local/bin` without sudo, and takes `CRAFT_INSTALL_DIR`, `CRAFT_VERSION` and `CRAFT_DOWNLOAD_URL`; tested against a local release server with a valid, a tampered and a missing checksum. The README drops the `package-lock.json` and "`craft init` coming soon" claims and documents every command, the store and virtual-store layout, `craft.lock`, `trustedDependencies`, `.npmrc` keys and the `CRAFT_*` variables.
+>
+> Not verified locally: the new CI matrix entries themselves; they run on the next tag.
 
 - Release workflow: publish `sha256` checksums; `install.sh` verifies them; support `CRAFT_INSTALL_DIR` / `~/.local/bin` without sudo.
 - Linux: add `aarch64-unknown-linux-gnu` and a `musl` static build.
