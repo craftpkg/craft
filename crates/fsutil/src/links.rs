@@ -84,6 +84,21 @@ pub fn relative_target(link: &Path, target: &Path) -> PathBuf {
     relative
 }
 
+/// Resolves `.` and `..` without touching the filesystem, for paths that may not exist.
+pub fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other),
+        }
+    }
+    normalized
+}
+
 #[derive(Clone, Copy)]
 enum LinkKind {
     Dir,
@@ -269,6 +284,14 @@ mod tests {
         }
 
         assert_eq!(std::fs::read_link(&link).unwrap(), target);
+    }
+
+    #[test]
+    fn test_normalize_lexically() {
+        assert_eq!(
+            normalize_lexically(Path::new("/app/node_modules/.bin/../cowsay/./cli.js")),
+            PathBuf::from("/app/node_modules/cowsay/cli.js")
+        );
     }
 
     #[test]
