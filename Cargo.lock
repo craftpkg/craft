@@ -312,6 +312,7 @@ dependencies = [
 name = "craft"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "assert_cmd",
  "cli",
  "contract",
@@ -1270,6 +1271,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "contract",
+ "tempfile",
  "tokio",
 ]
 
