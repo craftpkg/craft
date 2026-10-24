@@ -161,6 +161,159 @@ fn adds_a_tarball_url_verbatim() {
     assert_eq!(project.required_version("ms"), Ok("2.1.3".to_string()));
 }
 
+#[test]
+fn installs_git_dependencies_by_tag_range_and_branch() {
+    let registry = MockRegistry::start();
+    let project = Project::new(&registry, json!({}));
+    let url = git_repository(&project);
+    project.write_file(
+        "package.json",
+        &json!({
+            "dependencies": {
+                "tagged": format!("git+{url}#v1.0.0"),
+                "ranged": format!("git+{url}#semver:^1.0.0"),
+                "head": format!("git+{url}"),
+            }
+        })
+        .to_string(),
+    );
+
+    project.craft().arg("install").assert().success();
+
+    assert_eq!(project.required_version("tagged"), Ok("1.0.0".to_string()));
+    assert_eq!(project.required_version("ranged"), Ok("1.1.0".to_string()));
+    assert_eq!(
+        project.required_version("head"),
+        Ok("2.0.0-dev".to_string())
+    );
+}
+
+#[test]
+fn installs_the_registry_dependencies_of_a_git_dependency() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    let project = Project::new(&registry, json!({}));
+    let repository = project.path().join("repos/with-deps");
+    project.write_file(
+        "repos/with-deps/package.json",
+        r#"{ "name": "with-deps", "version": "1.0.0", "dependencies": { "ms": "^2.0.0" } }"#,
+    );
+    project.write_file(
+        "repos/with-deps/index.js",
+        r#"module.exports = { version: require("ms").version };"#,
+    );
+    git(
+        &repository,
+        &["init", "--quiet", "--initial-branch", "main"],
+    );
+    commit_all(&repository, "initial");
+    project.write_file(
+        "package.json",
+        &json!({ "dependencies": { "with-deps": format!("git+file://{}", repository.display()) } })
+            .to_string(),
+    );
+
+    project.craft().arg("install").assert().success();
+
+    assert_eq!(
+        project.required_version("with-deps"),
+        Ok("2.1.3".to_string())
+    );
+}
+
+#[test]
+fn adds_a_git_dependency_under_its_package_name() {
+    let registry = MockRegistry::start();
+    let project = Project::new(&registry, json!({ "name": "app" }));
+    let spec = format!("git+{}#v1.0.0", git_repository(&project));
+
+    project.craft().args(["add", &spec]).assert().success();
+
+    assert_eq!(
+        project.package_json()["dependencies"]["git-lib"],
+        spec.as_str()
+    );
+    assert_eq!(project.required_version("git-lib"), Ok("1.0.0".to_string()));
+}
+
+#[test]
+fn reports_a_git_ref_that_does_not_exist() {
+    let registry = MockRegistry::start();
+    let project = Project::new(&registry, json!({}));
+    let url = git_repository(&project);
+    project.write_file(
+        "package.json",
+        &json!({ "dependencies": { "git-lib": format!("git+{url}#no-such-branch") } }).to_string(),
+    );
+
+    project
+        .craft()
+        .arg("install")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(format!(
+            "no commit in {url} matches no-such-branch"
+        )));
+}
+
+/// A repository with `v1.0.0` (lightweight tag), `v1.1.0` (annotated tag) and an untagged
+/// `2.0.0-dev` commit on `main`, returned as a `file://` URL.
+fn git_repository(project: &Project) -> String {
+    let repository = project.path().join("repos/git-lib");
+    std::fs::create_dir_all(&repository).expect("create repository");
+    git(
+        &repository,
+        &["init", "--quiet", "--initial-branch", "main"],
+    );
+
+    for (version, tag) in [
+        ("1.0.0", Some(false)),
+        ("1.1.0", Some(true)),
+        ("2.0.0-dev", None),
+    ] {
+        project.write_file(
+            "repos/git-lib/package.json",
+            &format!(r#"{{ "name": "git-lib", "version": "{version}" }}"#),
+        );
+        project.write_file(
+            "repos/git-lib/index.js",
+            &format!(r#"module.exports = {{ version: "{version}" }};"#),
+        );
+        commit_all(&repository, version);
+        match tag {
+            Some(true) => git(
+                &repository,
+                &["tag", "-a", &format!("v{version}"), "-m", version],
+            ),
+            Some(false) => git(&repository, &["tag", &format!("v{version}")]),
+            None => {}
+        }
+    }
+    format!("file://{}", repository.display())
+}
+
+fn commit_all(repository: &std::path::Path, message: &str) {
+    git(repository, &["add", "--all"]);
+    git(repository, &["commit", "--quiet", "--message", message]);
+}
+
+fn git(repository: &std::path::Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=craft",
+            "-c",
+            "user.email=craft@example.com",
+        ])
+        .args(["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"])
+        .args(args)
+        .current_dir(repository)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .status()
+        .expect("git is required to run the e2e tests");
+    assert!(status.success(), "git {args:?} failed");
+}
+
 fn write_local_lib(project: &Project, version: &str) {
     project.write_file(
         "libs/local-lib/package.json",
