@@ -1,11 +1,26 @@
 mod add_package_actor;
 mod clean_cache_actor;
+mod dlx_actor;
+mod init_actor;
+mod inspect_actor;
 mod install_actor;
+mod lock_state;
+mod outdated_actor;
 mod remove_package_actor;
 mod run_script_actor;
+mod scripts;
+mod summary;
+mod trust_actor;
+mod update_actor;
 
 pub use add_package_actor::{AddActorPayload, AddPackageActor};
 pub use clean_cache_actor::{CleanCacheActor, CleanCacheActorPayload};
-pub use install_actor::InstallActor;
+pub use dlx_actor::{DlxActor, DlxPayload};
+pub use init_actor::InitActor;
+pub use inspect_actor::{InspectActor, InspectPayload};
+pub use install_actor::{InstallActor, InstallOptions};
+pub use outdated_actor::OutdatedActor;
 pub use remove_package_actor::{RemoveActorPayload, RemovePackageActor};
-pub use run_script_actor::{RunScriptActor, RunScriptActorPayload};
+pub use run_script_actor::{ListScriptsActor, RunScriptActor, RunScriptActorPayload};
+pub use trust_actor::TrustActor;
+pub use update_actor::{UpdateActor, UpdatePayload};

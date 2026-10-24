@@ -1,4 +1,4 @@
-use contract::Actor;
+use contract::{Actor, Context};
 
 #[derive(Debug, Clone)]
 pub struct CleanCacheActorPayload {
@@ -6,12 +6,13 @@ pub struct CleanCacheActorPayload {
 }
 
 pub struct CleanCacheActor {
+    context: Context,
     payload: CleanCacheActorPayload,
 }
 
 impl Actor<CleanCacheActorPayload> for CleanCacheActor {
-    fn with(payload: CleanCacheActorPayload) -> Self {
-        Self { payload }
+    fn with(context: Context, payload: CleanCacheActorPayload) -> Self {
+        Self { context, payload }
     }
 
     async fn run(&self) -> contract::Result<()> {
@@ -21,17 +22,22 @@ impl Actor<CleanCacheActorPayload> for CleanCacheActor {
             return Ok(());
         }
 
-        let cache_dir = contract::get_package_cache_dir();
-
-        if !cache_dir.exists() {
-            debug::info!("Cache directory does not exist: {:?}", cache_dir);
+        let store_dir = self.context.store_dir();
+        let legacy_cache_dir = self.context.legacy_cache_dir();
+        let metadata_cache_dir = self.context.metadata_cache_dir();
+        let has_cache =
+            store_dir.exists() || legacy_cache_dir.exists() || metadata_cache_dir.exists();
+        if !has_cache {
+            debug::info!("Store directory does not exist: {:?}", store_dir);
             return Ok(());
         }
 
         println!("Hope you're sure what you're doing");
 
-        tokio::fs::remove_dir_all(&cache_dir).await?;
-        tokio::fs::create_dir_all(&cache_dir).await?;
+        fsutil::remove_entry(&store_dir).await?;
+        fsutil::remove_entry(&legacy_cache_dir).await?;
+        fsutil::remove_entry(&metadata_cache_dir).await?;
+        tokio::fs::create_dir_all(&store_dir).await?;
         println!("✓ Cleaned all package cache");
 
         Ok(())
@@ -46,7 +52,8 @@ mod tests {
     fn test_clean_cache_actor_without_force() {
         let payload = CleanCacheActorPayload { force: false };
 
-        let actor = CleanCacheActor::with(payload);
+        let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false);
+        let actor = CleanCacheActor::with(context, payload);
         assert!(!actor.payload.force);
     }
 }

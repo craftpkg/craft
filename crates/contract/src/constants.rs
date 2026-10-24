@@ -1,26 +1,14 @@
-use std::path::PathBuf;
-
-pub const CRAFT_VERBOSE: &str = "CRAFT_VERBOSE";
-
-/// Get the package cache directory path
-/// - macOS/Linux: ~/.craft/packages
-/// - Windows: %USERPROFILE%\.craft\packages
-pub fn get_package_cache_dir() -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .expect("Could not determine home directory");
-
-    PathBuf::from(home).join(".craft").join("packages")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_get_package_cache_dir() {
-        let cache_dir = get_package_cache_dir();
-        assert!(cache_dir.to_string_lossy().contains(".craft"));
-        assert!(cache_dir.to_string_lossy().contains("packages"));
-    }
-}
+pub const CRAFT_HOME: &str = "CRAFT_HOME";
+pub const CRAFT_REGISTRY: &str = "CRAFT_REGISTRY";
+/// Install platform-specific packages for another OS, CPU or libc than the host's.
+pub const CRAFT_OS: &str = "CRAFT_OS";
+pub const CRAFT_CPU: &str = "CRAFT_CPU";
+pub const CRAFT_LIBC: &str = "CRAFT_LIBC";
+/// The release tag when built by the release workflow, the crate version otherwise.
+pub const CRAFT_VERSION: &str = match option_env!("CRAFT_RELEASE_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
+/// Bumped whenever the store's layout changes, so old entries are never misread.
+pub const STORE_VERSION: &str = "v1";
+pub const DEFAULT_REGISTRY: &str = "https://registry.npmjs.org";

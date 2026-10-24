@@ -7,15 +7,21 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+serde_json = "1.0"
+anyhow = "1.0"
 contract = { path = "../contract" }
 package = { path = "../package" }
 resolver = { path = "../resolver" }
 debug = { path = "../debug" }
 tarball = { path = "../tarball" }
+fsutil = { path = "../fsutil" }
+lockfile = { path = "../lockfile" }
+process = { path = "../process" }
+node-semver = "2.0"
 futures = "0.3"
 tokio = { version = "1.48.0", features = ["full"] }
 async-recursion = "1.0"
-node-semver = "2.0"
 
 [dev-dependencies]
+serde_json = "1.0"
 tempfile = "3.10"

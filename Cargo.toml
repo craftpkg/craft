@@ -14,8 +14,11 @@ members = [
   "crates/network",
   "crates/tarball",
   "crates/process",
+  "crates/fsutil",
+  "crates/testkit",
 ]
 resolver = "2"
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
+expect_used = "deny"

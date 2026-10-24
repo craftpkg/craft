@@ -11,7 +11,10 @@ env:
 
 jobs:
   build-test-lint:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
@@ -21,5 +24,38 @@ jobs:
       with:
         components: clippy, rustfmt
 
+    - name: Install Node.js for end-to-end tests
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
     - name: Run make (build, test, lint)
+      if: runner.os != 'Windows'
       run: make
+
+    - name: Build, test and lint
+      if: runner.os == 'Windows'
+      run: |
+        cargo fmt --all --check
+        cargo clippy --workspace --all-targets -- -D warnings
+        cargo test --workspace
+
+  registry-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Node.js for real-world tests
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Run tests that need registry.npmjs.org
+      run: cargo test -p resolver -- --ignored
+
+    - name: Run real-world scenarios
+      run: make real-world

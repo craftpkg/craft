@@ -1,84 +1,124 @@
-use contract::{Actor, Result};
-use package::PackageJson;
-use std::path::PathBuf;
-use tokio::fs;
+use std::path::Path;
+
+use contract::{Actor, Context, Result};
+use lockfile::Lockfile;
+use package::{DependencySection, PackageJson, ProjectManifest};
+use pipeline::prune_node_modules;
+
+use crate::lock_state::{InstallMode, mark_installed};
+use crate::scripts::script_policy;
+use crate::summary::report_changes;
 
 #[derive(Debug)]
 pub struct RemoveActorPayload {
     pub packages: Vec<String>,
-    pub working_dir: Option<PathBuf>,
 }
 
 pub struct RemovePackageActor {
+    context: Context,
     payload: RemoveActorPayload,
 }
 
 impl Actor<RemoveActorPayload> for RemovePackageActor {
-    fn with(payload: RemoveActorPayload) -> Self {
-        Self { payload }
+    fn with(context: Context, payload: RemoveActorPayload) -> Self {
+        Self { context, payload }
     }
 
     async fn run(&self) -> Result<()> {
-        let cwd =
-            self.payload.working_dir.clone().unwrap_or_else(|| {
-                std::env::current_dir().expect("Failed to get current directory")
-            });
-        let node_modules = cwd.join("node_modules");
+        let node_modules = self.context.node_modules_dir();
 
-        // Remove packages from node_modules
         for package_name in &self.payload.packages {
-            let package_path = node_modules.join(package_name);
+            for bin_name in remove_bins(&node_modules, package_name).await? {
+                debug::info!("Removed bin {} of {}", bin_name, package_name);
+            }
 
-            if package_path.exists() {
-                if package_path.is_symlink() {
-                    fs::remove_file(&package_path).await?;
-                } else {
-                    fs::remove_dir_all(&package_path).await?;
-                }
+            let package_path = node_modules.join(package_name);
+            if fsutil::remove_entry(&package_path).await? {
                 debug::info!("Removed {} from node_modules", package_name);
             } else {
                 debug::warning!("Package {} not found in node_modules", package_name);
             }
         }
+        prune_node_modules(&node_modules, None).await?;
 
-        // Update package.json if it exists
-        let package_json_path = cwd.join("package.json");
-
-        if package_json_path.exists() {
-            let content = fs::read_to_string(&package_json_path).await?;
-            let mut package_json: PackageJson = serde_json::from_str(&content)?;
-
-            // Remove from dependencies
-            if let Some(deps) = &mut package_json.dependencies {
-                for package_name in &self.payload.packages {
-                    if deps.remove(package_name).is_some() {
-                        debug::info!("Removed {} from dependencies", package_name);
-                    }
-                }
-            }
-
-            // Remove from devDependencies
-            if let Some(dev_deps) = &mut package_json.dev_dependencies {
-                for package_name in &self.payload.packages {
-                    if dev_deps.remove(package_name).is_some() {
-                        debug::info!("Removed {} from devDependencies", package_name);
-                    }
-                }
-            }
-
-            // Write updated package.json
-            let updated_content = serde_json::to_string_pretty(&package_json)?;
-            fs::write(&package_json_path, updated_content).await?;
-            debug::info!("Updated package.json");
+        let package_json_path = self.context.package_json_path();
+        if !package_json_path.exists() {
+            return Ok(());
         }
 
+        let mut manifest = ProjectManifest::open(&package_json_path).await?;
+        let mut is_changed = false;
+        for package_name in &self.payload.packages {
+            let mut was_listed = false;
+            for section in DependencySection::ALL {
+                if manifest.remove_dependency(section, package_name) {
+                    debug::info!("Removed {} from {}", package_name, section.key());
+                    was_listed = true;
+                }
+            }
+
+            if !was_listed {
+                self.context.reporter.warn(format!(
+                    "{package_name} is not a dependency of this project"
+                ));
+            }
+            is_changed |= was_listed;
+        }
+
+        if is_changed {
+            manifest.save().await?;
+            debug::info!("Updated package.json");
+        }
+        self.remove_from_lockfile().await
+    }
+}
+
+impl RemovePackageActor {
+    /// Drops the packages and whatever only they needed from `craft.lock`, without resolving.
+    async fn remove_from_lockfile(&self) -> Result<()> {
+        let Some(mut lockfile) = Lockfile::load(&self.context.cwd).await? else {
+            return Ok(());
+        };
+        let before = lockfile.clone();
+        for package_name in &self.payload.packages {
+            lockfile.remove_dependency(package_name);
+        }
+        lockfile.save(&self.context.cwd).await?;
+        let package_json = PackageJson::from_file(&self.context.package_json_path()).await?;
+        let policy = script_policy(&package_json, false);
+        let mode = InstallMode {
+            policy: &policy,
+            production: false,
+        };
+        mark_installed(&self.context, &lockfile, &mode).await?;
+        report_changes(&self.context, Some(&before), &lockfile);
         Ok(())
     }
+}
+
+/// Removes the `.bin` entries that run something inside the package, returning their names.
+async fn remove_bins(node_modules: &Path, package_name: &str) -> Result<Vec<String>> {
+    let bin_dir = node_modules.join(".bin");
+    let package_dir = node_modules.join(package_name);
+
+    let mut removed = Vec::new();
+    for name in fsutil::bin_names(&bin_dir).await? {
+        let link = bin_dir.join(&name);
+        let is_package_bin = fsutil::bin_target(&link)
+            .await
+            .is_some_and(|target| target.starts_with(&package_dir));
+        if is_package_bin {
+            fsutil::remove_bin(&link).await?;
+            removed.push(name);
+        }
+    }
+    Ok(removed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::fs;
 
     #[tokio::test]
     async fn test_remove_package_actor_removes_from_node_modules() {
@@ -93,14 +133,44 @@ mod tests {
 
         let payload = RemoveActorPayload {
             packages: vec!["test-package".to_string()],
-            working_dir: Some(temp_dir.path().to_path_buf()),
         };
 
-        let actor = RemovePackageActor::with(payload);
+        let actor = RemovePackageActor::with(temp_context(&temp_dir), payload);
         let result = actor.run().await;
 
         assert!(result.is_ok());
         assert!(!test_package.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_removes_only_the_bins_of_the_removed_package() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let node_modules = temp_dir.path().join("node_modules");
+        let bin_dir = node_modules.join(".bin");
+        fs::create_dir_all(&bin_dir).await.unwrap();
+        fs::symlink("../cowsay/cli.js", bin_dir.join("cowsay"))
+            .await
+            .unwrap();
+        fs::symlink(
+            node_modules.join("@scope/cow/say.js"),
+            bin_dir.join("cowthink"),
+        )
+        .await
+        .unwrap();
+        fs::symlink("../cowsay-extra/cli.js", bin_dir.join("extra"))
+            .await
+            .unwrap();
+        fs::symlink("../@scope/cow/say.js", bin_dir.join("scoped"))
+            .await
+            .unwrap();
+
+        let mut removed = remove_bins(&node_modules, "cowsay").await.unwrap();
+        removed.extend(remove_bins(&node_modules, "@scope/cow").await.unwrap());
+        removed.sort();
+
+        assert_eq!(removed, ["cowsay", "cowthink", "scoped"]);
+        assert!(fs::symlink_metadata(bin_dir.join("extra")).await.is_ok());
     }
 
     #[tokio::test]
@@ -125,10 +195,9 @@ mod tests {
 
         let payload = RemoveActorPayload {
             packages: vec!["react".to_string(), "typescript".to_string()],
-            working_dir: Some(temp_dir.path().to_path_buf()),
         };
 
-        let actor = RemovePackageActor::with(payload);
+        let actor = RemovePackageActor::with(temp_context(&temp_dir), payload);
         let result = actor.run().await;
 
         assert!(result.is_ok());
@@ -144,9 +213,8 @@ mod tests {
         assert!(!deps.contains_key("react"));
         assert!(deps.contains_key("lodash"));
 
-        // Verify typescript was removed from devDependencies
-        let dev_deps = package_json["devDependencies"].as_object().unwrap();
-        assert!(!dev_deps.contains_key("typescript"));
+        // Verify the emptied devDependencies section was removed
+        assert!(package_json.get("devDependencies").is_none());
     }
 
     #[tokio::test]
@@ -158,10 +226,9 @@ mod tests {
 
         let payload = RemoveActorPayload {
             packages: vec!["nonexistent-package".to_string()],
-            working_dir: Some(temp_dir.path().to_path_buf()),
         };
 
-        let actor = RemovePackageActor::with(payload);
+        let actor = RemovePackageActor::with(temp_context(&temp_dir), payload);
         let result = actor.run().await;
 
         // Should succeed even if package doesn't exist
@@ -172,9 +239,16 @@ mod tests {
     fn test_remove_actor_payload_creation() {
         let payload = RemoveActorPayload {
             packages: vec!["test".to_string()],
-            working_dir: None,
         };
 
         assert_eq!(payload.packages.len(), 1);
+    }
+
+    fn temp_context(temp_dir: &tempfile::TempDir) -> Context {
+        Context::new(
+            temp_dir.path().to_path_buf(),
+            temp_dir.path().join(".craft"),
+            false,
+        )
     }
 }

@@ -1,21 +1,85 @@
+use std::io::IsTerminal;
+use std::process::ExitCode;
+
 use cli::Cli;
-use contract::Result;
+use contract::{Context, NetworkMode, Result, ScriptError};
 use manager::CraftManager;
+use progress::{OutputMode, Reporter};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => report(&error),
+    }
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse_args();
-    let command = cli.normalize();
+    let action = cli.normalize();
 
-    let manager = CraftManager::new();
-
-    // Initialize debug logging if verbose mode is enabled
-    if cli.verbose {
+    if cli.debug {
         debug::init();
-        manager.set_verbose(cli.verbose);
     }
 
     debug::trace!("CLI: {:?}", &cli);
 
-    manager.handle_command(command).await
+    let mut context = Context::from_env(cli.debug)?;
+    context.reporter = Reporter::new(output_mode(&cli, context.ci));
+    if cli.offline {
+        context.registry.network_mode = NetworkMode::Offline;
+    } else if cli.prefer_offline {
+        context.registry.network_mode = NetworkMode::PreferOffline;
+    }
+    let manager = CraftManager::new(context);
+
+    manager.handle_command(action).await
+}
+
+/// A live status line only on an interactive terminal; debug logs and CI get plain output.
+fn output_mode(cli: &Cli, ci: bool) -> OutputMode {
+    if cli.silent {
+        return OutputMode::Silent;
+    }
+    let is_terminal = std::io::stderr().is_terminal();
+    let is_interactive = is_terminal && !ci && !cli.debug;
+    if is_interactive {
+        OutputMode::Interactive
+    } else {
+        OutputMode::Plain
+    }
+}
+
+/// A failed script already printed its own output, so craft adds one line and exits with the
+/// script's code; any other error prints its cause chain and, when one applies, a hint.
+fn report(error: &anyhow::Error) -> ExitCode {
+    if let Some(ScriptError::Failed { code, .. }) = error.downcast_ref::<ScriptError>() {
+        eprintln!("error: {error}");
+        return ExitCode::from(u8::try_from(*code).unwrap_or(1));
+    }
+
+    eprintln!("error: {error}");
+    for cause in error.chain().skip(1) {
+        eprintln!("  caused by: {cause}");
+    }
+    if let Some(hint) = hint(error) {
+        eprintln!("  hint: {hint}");
+    }
+    ExitCode::FAILURE
+}
+
+/// Advice for failures with a common, fixable cause.
+fn hint(error: &anyhow::Error) -> Option<&'static str> {
+    error.chain().find_map(|cause| {
+        let io_error = cause.downcast_ref::<std::io::Error>()?;
+        match io_error.kind() {
+            std::io::ErrorKind::PermissionDenied => {
+                Some("check that you may write to the path above, or run craft as its owner")
+            }
+            std::io::ErrorKind::StorageFull => {
+                Some("the disk is full; `craft cache clean --force` frees the global store")
+            }
+            _ => None,
+        }
+    })
 }

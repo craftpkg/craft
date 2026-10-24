@@ -1,3 +1,5 @@
+mod integrity;
 mod network;
 
-pub use network::Network;
+pub use integrity::{Integrity, IntegrityHasher};
+pub use network::{Network, Revalidated, Validators};

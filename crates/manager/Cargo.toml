@@ -11,7 +11,9 @@ contract = { path = "../contract" }
 debug = { path = "../debug" }
 
 [dev-dependencies]
-tokio = { version = "1.0", features = ["macros", "rt"] }
+tokio = { version = "1.0", features = ["macros", "rt", "fs"] }
+tempfile = "3.10"
+serde_json = "1.0"
 
 [lints]
 workspace = true

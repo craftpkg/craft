@@ -19,7 +19,134 @@ pub enum PipelineError {
 }
 
 #[derive(Error, Debug)]
+pub enum NetworkError {
+    #[error("GET {url} returned HTTP {status}")]
+    Status { url: String, status: u16 },
+
+    #[error("{url} is not cached and craft is offline")]
+    Offline { url: String },
+}
+
+#[derive(Error, Debug)]
+pub enum IntegrityError {
+    #[error("tarball integrity mismatch: expected {expected}, got {actual}")]
+    Mismatch { expected: String, actual: String },
+
+    #[error("unsupported or malformed integrity: {integrity}")]
+    Invalid { integrity: String },
+}
+
+#[derive(Error, Debug)]
+pub enum RegistryError {
+    #[error("package {name} not found in {registry}")]
+    PackageNotFound { name: String, registry: String },
+
+    #[error("{registry} denied access to {name} (HTTP {status}); check your registry credentials")]
+    AccessDenied {
+        name: String,
+        registry: String,
+        status: u16,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum ContextError {
+    #[error("could not determine home directory; set CRAFT_HOME")]
+    NoHomeDir,
+}
+
+#[derive(Error, Debug)]
+pub enum SpecError {
+    #[error("invalid dependency spec: {dependency}")]
+    Invalid { dependency: String },
+
+    #[error("{kind} dependencies are not supported yet: {dependency}")]
+    Unsupported {
+        kind: &'static str,
+        dependency: String,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum TarballError {
+    #[error("tarball entry escapes the package directory: {path}")]
+    UnsafePath { path: String },
+}
+
+#[derive(Error, Debug)]
+pub enum ScriptError {
+    #[error("script \"{name}\" not found{}", available_scripts(.available))]
+    NotFound {
+        name: String,
+        available: Vec<String>,
+    },
+
+    #[error("{name} exited with code {code}")]
+    Failed { name: String, code: i32 },
+
+    #[error(
+        "no {name} in node_modules/.bin; add the package that provides it, or try `craft dlx {name}`"
+    )]
+    BinNotFound { name: String },
+
+    #[error("{package} has no bin named {name}; it provides: {}", .available.join(", "))]
+    NoSuchBin {
+        package: String,
+        name: String,
+        available: Vec<String>,
+    },
+
+    #[error("{event} script of {package} failed with exit code {code}:\n{output}")]
+    InstallFailed {
+        package: String,
+        event: String,
+        code: i32,
+        output: String,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum LockfileError {
+    #[error("craft.lock is missing; run `craft install` to create it")]
+    Missing,
+
+    #[error("craft.lock is out of date with package.json: {}; run `craft install` to update it", .differences.join(", "))]
+    OutOfDate { differences: Vec<String> },
+
+    #[error("{dependency} is not in craft.lock; run `craft install` to update it")]
+    NotLocked { dependency: String },
+
+    #[error(
+        "craft.lock has lockfileVersion {found}, but this craft reads up to {supported}; upgrade craft"
+    )]
+    UnsupportedVersion { found: u32, supported: u32 },
+}
+
+#[derive(Error, Debug)]
+pub enum PlatformError {
+    #[error("{package} does not support {platform}, but {dependent} requires it")]
+    Unsupported {
+        package: String,
+        platform: String,
+        dependent: String,
+    },
+}
+
+#[derive(Error, Debug)]
 pub enum PackageError {
-    #[error("no package.json found")]
+    #[error("no package.json found; run `craft init` to create one")]
     NoPackageJson,
+
+    #[error("package.json already exists")]
+    AlreadyExists,
+
+    #[error("package.json must contain a JSON object")]
+    NotAnObject,
+}
+
+fn available_scripts(available: &[String]) -> String {
+    if available.is_empty() {
+        return String::new();
+    }
+    format!("; available scripts: {}", available.join(", "))
 }

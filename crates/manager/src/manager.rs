@@ -1,116 +1,268 @@
 use actor::{
-    AddActorPayload, AddPackageActor, CleanCacheActor, CleanCacheActorPayload, InstallActor,
-    RemoveActorPayload, RemovePackageActor, RunScriptActor, RunScriptActorPayload,
+    AddActorPayload, AddPackageActor, CleanCacheActor, CleanCacheActorPayload, DlxActor,
+    DlxPayload, InitActor, InspectActor, InspectPayload, InstallActor, InstallOptions,
+    ListScriptsActor, OutdatedActor, RemoveActorPayload, RemovePackageActor, RunScriptActor,
+    RunScriptActorPayload, TrustActor, UpdateActor, UpdatePayload,
 };
-use cli::{CacheCommands, Commands};
-use contract::Actor;
+use cli::{Action, CacheCommands};
+use contract::{Actor, Context};
 
-pub struct CraftManager;
+pub struct CraftManager {
+    context: Context,
+}
 
 impl CraftManager {
-    pub fn new() -> Self {
-        Self
+    pub fn new(context: Context) -> Self {
+        Self { context }
     }
 
-    pub fn set_verbose(&self, verbose: bool) {
-        if verbose {
-            // SAFETY: We're setting a simple environment variable for this process only
-            // This is safe as we control the key and value, and it doesn't affect other threads
-            unsafe {
-                std::env::set_var(contract::CRAFT_VERBOSE, "1");
-            }
-        }
-    }
+    pub async fn handle_command(&self, action: Action) -> contract::Result<()> {
+        let context = self.context.clone();
 
-    pub async fn handle_command(&self, command: Commands) -> contract::Result<()> {
-        match command {
-            Commands::Add { packages, dev } => {
-                AddPackageActor::with(AddActorPayload {
-                    packages,
-                    is_dev: dev,
-                })
+        match action {
+            Action::Add {
+                packages,
+                dev,
+                exact,
+                optional,
+                peer,
+                ignore_scripts,
+            } => {
+                AddPackageActor::with(
+                    context,
+                    AddActorPayload {
+                        packages,
+                        is_dev: dev,
+                        is_exact: exact,
+                        is_optional: optional,
+                        is_peer: peer,
+                        ignore_scripts,
+                    },
+                )
                 .run()
                 .await
             }
-            Commands::Remove { packages } => {
-                RemovePackageActor::with(RemoveActorPayload {
-                    packages,
-                    working_dir: None,
-                })
-                .run()
-                .await
-            }
-            Commands::Run { script, args } => {
-                RunScriptActor::with(RunScriptActorPayload { script, args })
+            Action::Remove { packages } => {
+                RemovePackageActor::with(context, RemoveActorPayload { packages })
                     .run()
                     .await
             }
-            Commands::Cache { command } => match command {
+            Action::Run { script, args } => {
+                let payload = RunScriptActorPayload {
+                    script,
+                    args,
+                    bin_only: false,
+                };
+                RunScriptActor::with(context, payload).run().await
+            }
+            Action::ListScripts => ListScriptsActor::with(context, ()).run().await,
+            Action::Init => InitActor::with(context, ()).run().await,
+            Action::Trust { packages } => TrustActor::with(context, packages).run().await,
+            Action::Outdated => OutdatedActor::with(context, ()).run().await,
+            Action::Exec { command, args } => {
+                let payload = RunScriptActorPayload {
+                    script: command,
+                    args,
+                    bin_only: true,
+                };
+                RunScriptActor::with(context, payload).run().await
+            }
+            Action::Dlx {
+                package,
+                command,
+                args,
+            } => {
+                let payload = DlxPayload {
+                    package,
+                    command,
+                    args,
+                };
+                DlxActor::with(context, payload).run().await
+            }
+            Action::Update { packages, latest } => {
+                UpdateActor::with(context, UpdatePayload { packages, latest })
+                    .run()
+                    .await
+            }
+            Action::List { depth } => {
+                InspectActor::with(context, InspectPayload::List { depth })
+                    .run()
+                    .await
+            }
+            Action::Why { package } => {
+                InspectActor::with(context, InspectPayload::Why { name: package })
+                    .run()
+                    .await
+            }
+            Action::Cache { command } => match command {
                 CacheCommands::Clean { force } => {
-                    CleanCacheActor::with(CleanCacheActorPayload { force })
+                    CleanCacheActor::with(context, CleanCacheActorPayload { force })
                         .run()
                         .await
                 }
             },
-            Commands::Start => {
-                RunScriptActor::with(RunScriptActorPayload {
-                    script: "start".to_string(),
-                    args: vec![],
-                })
-                .run()
-                .await
+            Action::Install {
+                frozen_lockfile,
+                ignore_scripts,
+                production,
+            } => {
+                let options = InstallOptions {
+                    frozen_lockfile,
+                    clean: false,
+                    ignore_scripts,
+                    production,
+                };
+                InstallActor::with(context, options).run().await
             }
-            Commands::Test => {
-                RunScriptActor::with(RunScriptActorPayload {
-                    script: "test".to_string(),
-                    args: vec![],
-                })
-                .run()
-                .await
-            }
-            Commands::Install => InstallActor::with(()).run().await,
-            Commands::External(args) => {
-                if let Some(script) = args.first() {
-                    RunScriptActor::with(RunScriptActorPayload {
-                        script: script.clone(),
-                        args: args[1..].to_vec(),
-                    })
-                    .run()
-                    .await
-                } else {
-                    InstallActor::with(()).run().await
-                }
+            Action::Ci { ignore_scripts } => {
+                let options = InstallOptions {
+                    frozen_lockfile: true,
+                    clean: true,
+                    ignore_scripts,
+                    production: false,
+                };
+                InstallActor::with(context, options).run().await
             }
         }
-    }
-}
-
-impl Default for CraftManager {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cli::Commands;
+    use contract::Result;
+    use tempfile::TempDir;
 
     #[tokio::test]
-    async fn test_handle_start_command() {
-        let manager = CraftManager::new();
-        // Just verifying it doesn't panic for now, as we are printing to stdout
-        let _ = manager.handle_command(Commands::Start).await;
+    async fn test_run_start_runs_start_script() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        write_package_json(
+            &temp_dir,
+            r#"{"scripts":{"start":"echo started > started.txt"}}"#,
+        )
+        .await?;
+
+        temp_manager(&temp_dir)
+            .handle_command(Action::Run {
+                script: "start".to_string(),
+                args: vec![],
+            })
+            .await?;
+
+        assert!(temp_dir.path().join("started.txt").exists());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_handle_add_command() {
-        let manager = CraftManager::new();
-        let _ = manager
-            .handle_command(Commands::Add {
-                packages: vec!["react".to_string()],
-                dev: false,
+    async fn test_run_runs_named_script() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        write_package_json(
+            &temp_dir,
+            r#"{"scripts":{"greet":"echo hello > greeted.txt"}}"#,
+        )
+        .await?;
+
+        temp_manager(&temp_dir)
+            .handle_command(Action::Run {
+                script: "greet".to_string(),
+                args: vec![],
+            })
+            .await?;
+
+        assert!(temp_dir.path().join("greeted.txt").exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_install_without_package_json_fails() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+
+        let result = temp_manager(&temp_dir)
+            .handle_command(Action::Install {
+                frozen_lockfile: false,
+                ignore_scripts: false,
+                production: false,
             })
             .await;
+
+        let error = result.err().map(|e| e.to_string());
+        assert_eq!(
+            error.as_deref(),
+            Some("no package.json found; run `craft init` to create one")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_remove_drops_dependency_from_package_json() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        write_package_json(
+            &temp_dir,
+            r#"{"dependencies":{"ms":"^2.1.3","lodash":"^4.17.21"}}"#,
+        )
+        .await?;
+
+        temp_manager(&temp_dir)
+            .handle_command(Action::Remove {
+                packages: vec!["ms".to_string()],
+            })
+            .await?;
+
+        let content = tokio::fs::read_to_string(temp_dir.path().join("package.json")).await?;
+        let package_json: serde_json::Value = serde_json::from_str(&content)?;
+        assert!(package_json["dependencies"].get("ms").is_none());
+        assert!(package_json["dependencies"].get("lodash").is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_cache_clean_with_force_empties_cache() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let manager = temp_manager(&temp_dir);
+        let cached_package = manager.context.store_dir().join("ms@2.1.3-0123456789ab");
+        let legacy_package = manager.context.legacy_cache_dir().join("ms-2.1.3");
+        tokio::fs::create_dir_all(&cached_package).await?;
+        tokio::fs::create_dir_all(&legacy_package).await?;
+
+        manager
+            .handle_command(Action::Cache {
+                command: CacheCommands::Clean { force: true },
+            })
+            .await?;
+
+        assert!(!cached_package.exists());
+        assert!(!manager.context.legacy_cache_dir().exists());
+        assert!(manager.context.store_dir().exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_cache_clean_without_force_keeps_cache() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let manager = temp_manager(&temp_dir);
+        let cached_package = manager.context.store_dir().join("ms@2.1.3-0123456789ab");
+        tokio::fs::create_dir_all(&cached_package).await?;
+
+        manager
+            .handle_command(Action::Cache {
+                command: CacheCommands::Clean { force: false },
+            })
+            .await?;
+
+        assert!(cached_package.exists());
+        Ok(())
+    }
+
+    fn temp_manager(temp_dir: &TempDir) -> CraftManager {
+        CraftManager::new(Context::new(
+            temp_dir.path().to_path_buf(),
+            temp_dir.path().join(".craft"),
+            false,
+        ))
+    }
+
+    async fn write_package_json(temp_dir: &TempDir, content: &str) -> Result<()> {
+        tokio::fs::write(temp_dir.path().join("package.json"), content).await?;
+        Ok(())
     }
 }

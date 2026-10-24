@@ -1,13 +1,15 @@
 [package]
 name = "tarball"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+
+[lints]
+workspace = true
 
 [dependencies]
+anyhow = "1.0"
 flate2 = "1.0"
 tar = "0.4"
 contract = { path = "../contract" }
-tokio = { version = "1.48.0", features = ["rt", "macros"] }
-
-[dev-dependencies]
+tokio = { version = "1.48.0", features = ["rt", "macros", "sync"] }
 tempfile = "3.10"
