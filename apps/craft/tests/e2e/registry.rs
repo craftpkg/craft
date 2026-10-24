@@ -225,3 +225,21 @@ fn limits_requests_in_flight() {
     assert!(max_in_flight <= 4, "{max_in_flight} requests at once");
     assert!(max_in_flight >= 2, "{max_in_flight} requests at once");
 }
+
+#[test]
+fn retries_an_interrupted_tarball_download() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    let package_json = json!({ "dependencies": { "ms": "^2.0.0" } });
+    let original = Project::new(&registry, package_json.clone());
+    original.craft().arg("install").assert().success();
+
+    let checkout = Project::new(&registry, package_json);
+    checkout.write_file("craft.lock", &original.read_file("craft.lock"));
+    registry.fail_next(1, 502, Some(0));
+    checkout.craft().arg("install").assert().success();
+
+    let tarball = "/ms/-/ms-2.1.3.tgz";
+    assert_eq!(requests_for(&registry, tarball), 3);
+    assert_eq!(checkout.required_version("ms"), Ok("2.1.3".to_string()));
+}
