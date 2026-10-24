@@ -61,7 +61,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | **Phase 3 — Lockfile** | | | |
 | 3.1 | Lockfile format (text, deterministic) | P0 | [x] |
 | 3.2 | Write lockfile after install/add/remove | P0 | [x] |
-| 3.3 | Install from lockfile (skip resolution) | P0 | [ ] |
+| 3.3 | Install from lockfile (skip resolution) | P0 | [x] |
 | 3.4 | `--frozen-lockfile` / `craft ci` | P1 | [ ] |
 | **Phase 4 — Platform packages & lifecycle scripts** | | | |
 | 4.1 | `optionalDependencies` | P0 | [ ] |
@@ -579,7 +579,9 @@ README says "`package-lock.json` support (coming soon)" — decide whether that 
 
 - Serialize the `ResolutionGraph` (1.2) after every successful `install`/`add`/`remove`; write atomically; only write when contents changed.
 
-### 3.3 Install from lockfile · P0
+### 3.3 Install from lockfile · P0 — ✔ done
+
+> Done: `resolver::LockPreferences` answers registry requests with the highest locked version satisfying the range (a dist-tag takes the highest locked version) and git URLs with the locked commit, before any registry or `git ls-remote` call. Locked artifacts carry no manifest; `InstallPipe::fetch` reads it from the store entry, downloading by locked tarball + integrity if needed. Project dependencies whose specifier changed — and every package passed to `craft add` — resolve afresh (`InstallPackage::without_lock`), while their subtrees still prefer locked versions; the peer pass simply reruns. After each install a copy of the lockfile goes to `node_modules/.craft/lock.json`; when package.json, craft.lock and that copy agree (and no `file:` directory needs re-copying), `craft install` prints `Already up to date`. Measured on the Vite/React project: up to date 6 ms; `node_modules` deleted with a warm store 0.4 s; fresh checkout with an empty store 2.4 s (tarballs only); resolving without a lockfile 13.5 s.
 
 - If every importer specifier in `package.json` matches the lockfile, skip all registry metadata requests: download/verify by `resolved` + `integrity` only.
 - If some specifiers changed, keep locked versions for unchanged deps and re-resolve only the changed subtrees.
@@ -627,7 +629,7 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 
 ### 5.2 Memoize packument fetches per name · P2
 
-- Today every `(name, range)` pair fetches the full packument again (`npm.rs:23`). Cache `Arc<Packument>` per name in a `DashMap<String, OnceCell<…>>` (or `futures::Shared`) so concurrent requests for the same name share one fetch.
+- Today every `(name, range)` pair fetches the full packument again (`npm.rs:23`) — measured: 415 packument requests for a 218-package tree (`debug` ×11, `@babel/types` ×11). Cache `Arc<Packument>` per name in a `DashMap<String, OnceCell<…>>` (or `futures::Shared`) so concurrent requests for the same name share one fetch.
 
 ### 5.3 Global concurrency limits · P2
 
