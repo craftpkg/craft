@@ -51,6 +51,10 @@ impl PackageJson {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct PackageDist {
     pub tarball: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integrity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shasum: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
