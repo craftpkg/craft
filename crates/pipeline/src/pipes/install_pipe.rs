@@ -57,6 +57,8 @@ impl InstallPipe {
         self
     }
 
+    // async_recursion marks the boxed future it returns `#[must_use]` a second time.
+    #[allow(clippy::double_must_use)]
     #[async_recursion::async_recursion]
     async fn resolve_package(
         &self,
