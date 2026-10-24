@@ -77,7 +77,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 5.7 | Registry configuration (`.npmrc`, scopes, auth) | P1 | [x] |
 | **Phase 6 — CLI & UX** | | | |
 | 6.1 | Progress output and install summary | P2 | [x] |
-| 6.2 | Error reporting (no panics, contextual messages) | P2 | [ ] |
+| 6.2 | Error reporting (no panics, contextual messages) | P2 | [x] |
 | 6.3 | Missing commands and flags | P2 | [x] |
 | 6.4 | Windows support (shims, junctions) | P2 | [ ] |
 | 6.5 | Release & docs accuracy | P2 | [ ] |
@@ -690,7 +690,9 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 - Final summary: `+ react 19.2.0`, `- lodash 4.17.21`, `N packages installed in X.Xs`, peer warnings, skipped install scripts, deprecations.
 - Respect non-TTY / `CI` (plain output), `--silent`, `NO_COLOR`.
 
-### 6.2 Error reporting · P2
+### 6.2 Error reporting · P2 — ✔ done
+
+> Done: no panic is reachable outside tests — clippy denies `unwrap`/`expect` workspace-wide, there is no `panic!`/`unreachable!`/`todo!`, and a `clippy::indexing_slicing` + `string_slice` audit found only indices on ASCII boundaries or bounded by `zip`. Errors print as `error: <message>`, one `  caused by: …` line per cause and, for a fixable cause, `  hint: …` (permission denied → check write access; disk full → `craft cache clean --force`). Every `fsutil` operation names what it did to which path (`could not create directory …/node_modules: Permission denied`) while keeping the IO error kind; tarball extraction, download persistence, package.json reads/writes, store directories and pruning carry their paths too. A registry that can't be reached collapses reqwest's nested errors into `could not reach <host> (<reason>); check your network connection and proxy settings, or use --offline`.
 
 - No panics reachable from user input (1.1, 0.1, `linker_pipe.rs:211` `expect`).
 - Print `error: <message>` + cause chain + hint, exit 1 (scripts: exit with their code, 1.12). Install `miette` or format anyhow chains manually.
