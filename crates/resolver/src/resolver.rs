@@ -1,8 +1,9 @@
 use crate::{GitResolver, NpmResolver, ResolvedArtifact, download_artifact::DownloadArtifact};
-use contract::{Result, get_package_cache_dir};
+use contract::Result;
 use network::Network;
 use package::InstallPackage;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -11,16 +12,18 @@ pub struct Resolver {
     npm_resolver: NpmResolver,
     git_resolver: GitResolver,
     network: Network,
+    cache_dir: PathBuf,
     // File-level locks to prevent concurrent downloads to the same file
     download_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 impl Resolver {
-    pub fn new() -> Self {
+    pub fn new(cache_dir: PathBuf) -> Self {
         Self {
             npm_resolver: NpmResolver::new(),
             git_resolver: GitResolver::new(),
             network: Network::new(),
+            cache_dir,
             download_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -43,13 +46,11 @@ impl Resolver {
         &self,
         artifact: &ResolvedArtifact,
     ) -> contract::Result<DownloadArtifact> {
-        let cache_dir = get_package_cache_dir();
-
-        tokio::fs::create_dir_all(&cache_dir).await?;
+        tokio::fs::create_dir_all(&self.cache_dir).await?;
 
         // Construct the file path: ~/.craft/packages/{name}-{version}.tgz
         let filename = format!("{}-{}.tgz", artifact.name, artifact.version);
-        let file_path = cache_dir.join(&filename);
+        let file_path = self.cache_dir.join(&filename);
 
         // Get or create a lock for this specific file
         let file_lock = {
@@ -95,12 +96,6 @@ impl Resolver {
     }
 }
 
-impl Default for Resolver {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,7 +103,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_npm_package() {
         let pkg = InstallPackage::new("react".to_string(), Some("17.0.2".to_string()), false);
-        let resolver = Resolver::new();
+        let resolver = Resolver::new(std::env::temp_dir());
         let result = resolver.resolve(&pkg).await;
 
         assert!(result.is_ok());
@@ -120,7 +115,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_git_package() {
         let pkg = InstallPackage::new("git:github.com/user/repo.git".to_string(), None, false);
-        let resolver = Resolver::new();
+        let resolver = Resolver::new(std::env::temp_dir());
         let result = resolver.resolve(&pkg).await;
 
         assert!(result.is_ok());
@@ -132,7 +127,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_npm_latest() {
         let pkg = InstallPackage::new("express".to_string(), None, false);
-        let resolver = Resolver::new();
+        let resolver = Resolver::new(std::env::temp_dir());
         let result = resolver.resolve(&pkg).await;
 
         assert!(result.is_ok());
@@ -144,7 +139,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_gitlab_package() {
         let pkg = InstallPackage::new("git:gitlab.com/package/psc".to_string(), None, false);
-        let resolver = Resolver::new();
+        let resolver = Resolver::new(std::env::temp_dir());
         let result = resolver.resolve(&pkg).await;
 
         assert!(result.is_ok());
