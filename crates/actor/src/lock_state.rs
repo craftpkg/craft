@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use contract::{Context, Result};
 use lockfile::{LockedDependency, LockedSource, Lockfile};
@@ -49,14 +49,7 @@ pub(crate) async fn is_up_to_date(
     let Some(lockfile) = lockfile else {
         return false;
     };
-    let packages = manifest_packages(package_json);
-    let locked_count = lockfile.root().map_or(0, |root| {
-        root.dependencies.len() + root.dev_dependencies.len()
-    });
-    let matches_manifest = packages.len() == locked_count
-        && packages
-            .iter()
-            .all(|package| locked_entry(Some(lockfile), package).is_some());
+    let matches_manifest = lock_differences(lockfile, package_json).is_empty();
     let has_directories = lockfile
         .packages
         .values()
@@ -72,17 +65,62 @@ pub(crate) async fn is_up_to_date(
     installed.is_some() && installed == current
 }
 
+/// How package.json and craft.lock's project entry disagree, one phrase per dependency.
+pub(crate) fn lock_differences(lockfile: &Lockfile, package_json: &PackageJson) -> Vec<String> {
+    let packages = manifest_packages(package_json);
+    let mut differences: Vec<String> = packages
+        .iter()
+        .filter(|package| locked_entry(Some(lockfile), package).is_none())
+        .map(|package| {
+            let specifier = package.version.as_deref().unwrap_or_default();
+            let locked = locked_section(lockfile, package.is_dev)
+                .and_then(|section| section.get(&package.name));
+            match locked {
+                Some(locked) => format!(
+                    "{} ({specifier} in package.json, {} in craft.lock)",
+                    package.name, locked.specifier
+                ),
+                None => format!("{} (not in craft.lock)", package.name),
+            }
+        })
+        .collect();
+
+    for is_dev in [false, true] {
+        let Some(section) = locked_section(lockfile, is_dev) else {
+            continue;
+        };
+        let unlisted = section.keys().filter(|name| {
+            !packages
+                .iter()
+                .any(|package| is_declared_as(package, name, is_dev))
+        });
+        differences.extend(unlisted.map(|name| format!("{name} (not in package.json)")));
+    }
+    differences.sort();
+    differences
+}
+
+fn is_declared_as(package: &InstallPackage, name: &str, is_dev: bool) -> bool {
+    package.is_dev == is_dev && package.name == name
+}
+
+fn locked_section(
+    lockfile: &Lockfile,
+    is_dev: bool,
+) -> Option<&BTreeMap<String, LockedDependency>> {
+    let root = lockfile.root()?;
+    Some(if is_dev {
+        &root.dev_dependencies
+    } else {
+        &root.dependencies
+    })
+}
+
 fn locked_entry<'a>(
     lockfile: Option<&'a Lockfile>,
     package: &InstallPackage,
 ) -> Option<&'a LockedDependency> {
-    let root = lockfile?.root()?;
-    let section = if package.is_dev {
-        &root.dev_dependencies
-    } else {
-        &root.dependencies
-    };
-    section
+    locked_section(lockfile?, package.is_dev)?
         .get(&package.name)
         .filter(|locked| Some(&locked.specifier) == package.version.as_ref())
 }
