@@ -1,5 +1,6 @@
 mod add_package_actor;
 mod clean_cache_actor;
+mod dlx_actor;
 mod init_actor;
 mod inspect_actor;
 mod install_actor;
@@ -14,6 +15,7 @@ mod update_actor;
 
 pub use add_package_actor::{AddActorPayload, AddPackageActor};
 pub use clean_cache_actor::{CleanCacheActor, CleanCacheActorPayload};
+pub use dlx_actor::{DlxActor, DlxPayload};
 pub use init_actor::InitActor;
 pub use inspect_actor::{InspectActor, InspectPayload};
 pub use install_actor::{InstallActor, InstallOptions};
