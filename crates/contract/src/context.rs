@@ -1,7 +1,10 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use crate::constants::{CRAFT_HOME, CRAFT_REGISTRY, DEFAULT_REGISTRY, STORE_VERSION};
+use crate::HostPlatform;
+use crate::constants::{
+    CRAFT_CPU, CRAFT_HOME, CRAFT_LIBC, CRAFT_OS, CRAFT_REGISTRY, DEFAULT_REGISTRY, STORE_VERSION,
+};
 use crate::{ContextError, Result};
 
 #[derive(Debug, Clone)]
@@ -12,6 +15,8 @@ pub struct Context {
     pub verbose: bool,
     /// Whether craft runs in CI (`CI` is set and not `0`/`false`), where installs are frozen.
     pub ci: bool,
+    /// The platform optional and platform-specific packages are chosen for.
+    pub platform: HostPlatform,
 }
 
 impl Context {
@@ -22,6 +27,7 @@ impl Context {
             registry: DEFAULT_REGISTRY.to_string(),
             verbose,
             ci: false,
+            platform: HostPlatform::detect(),
         }
     }
 
@@ -31,8 +37,14 @@ impl Context {
         let cwd = std::env::current_dir()?;
         let user_home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
         let craft_home = resolve_craft_home(std::env::var_os(CRAFT_HOME), user_home)?;
+        let platform = HostPlatform::detect().with_overrides(
+            std::env::var(CRAFT_OS).ok(),
+            std::env::var(CRAFT_CPU).ok(),
+            std::env::var(CRAFT_LIBC).ok(),
+        );
         let context = Self {
             ci: is_ci(std::env::var("CI").ok().as_deref()),
+            platform,
             ..Self::new(cwd, craft_home, verbose)
         };
 
