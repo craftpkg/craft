@@ -110,7 +110,7 @@ fn never_prints_tokens() {
 
     let output = project
         .craft()
-        .args(["--verbose", "install"])
+        .args(["--debug", "install"])
         .output()
         .expect("craft runs");
 
