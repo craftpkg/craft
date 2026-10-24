@@ -55,7 +55,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | **Phase 2 — Store & layout redesign** | | | |
 | 2.1 | Global content-addressed store (read-only) | P0 | [x] |
 | 2.2 | Per-project virtual store `node_modules/.craft` | P0 | [x] |
-| 2.3 | Peer dependency resolution | P0 | [ ] |
+| 2.3 | Peer dependency resolution | P0 | [x] |
 | 2.4 | Bins inside the virtual store | P1 | [x] |
 | 2.5 | Prune extraneous packages | P1 | [x] |
 | **Phase 3 — Lockfile** | | | |
@@ -508,7 +508,9 @@ project/node_modules/
 
 **Done when** the concurrent-install scenario passes 20/20 and deleting `~/.craft` doesn't break an already-installed project if materialization used copies/hardlinks.
 
-### 2.3 Peer dependency resolution · P0 ✅
+### 2.3 Peer dependency resolution · P0 ✅ — ✔ done
+
+> Done: `InstallPipe` records each package's peers (`PackageJson::peer_dependencies`, with `peerDependenciesMeta` optional flags) and resolves every required peer on its own as a fallback candidate. A pure pass (`pipes::peers::resolve_peers`) then rewrites the graph from the roots: a peer resolves from the parent's `node_modules` (its dependencies and its own resolved peers), then the project's dependencies, then the candidate (npm ≥ 7 auto-install); optional peers are linked only when provided; a peer the package also depends on is just that dependency. Each distinct resolution is its own instance, `NodeId::with_peers` → `ui@1.0.0_react@18.3.1`, which names its virtual store entry, and peers are `DependencyKind::Peer` edges linked beside the package. Unmet ranges warn (`… wants peer react@^18 || ^19 but gets 17.0.2`). Because a package's scope is exactly its own dependencies and peers (plus the project root), the instance id determines the whole subtree, so instances are memoized; mutual sibling peers are cycle-guarded. Verified with React Redux + Redux Toolkit + React Router + React Query: hooks render through `renderToString` with a single React instance. Not done: `--strict-peer-dependencies` (6.3).
 
 **Problem** — `peerDependencies` are ignored entirely (`install_pipe.rs:95` only reads `dependencies`).
 
