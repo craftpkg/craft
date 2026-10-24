@@ -28,6 +28,8 @@ pub struct Importer {
     pub dependencies: BTreeMap<String, LockedDependency>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub dev_dependencies: BTreeMap<String, LockedDependency>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub optional_dependencies: BTreeMap<String, LockedDependency>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -172,8 +174,9 @@ impl Lockfile {
         };
         let was_dependency = root.dependencies.remove(name).is_some();
         let was_dev_dependency = root.dev_dependencies.remove(name).is_some();
+        let was_optional_dependency = root.optional_dependencies.remove(name).is_some();
         self.prune_unreachable();
-        was_dependency || was_dev_dependency
+        was_dependency || was_dev_dependency || was_optional_dependency
     }
 
     fn prune_unreachable(&mut self) {
@@ -186,6 +189,7 @@ impl Lockfile {
                     .dependencies
                     .values()
                     .chain(importer.dev_dependencies.values())
+                    .chain(importer.optional_dependencies.values())
             })
             .map(|dependency| &dependency.version)
             .collect();
@@ -220,6 +224,7 @@ mod tests {
                     },
                 )]),
                 dev_dependencies: BTreeMap::new(),
+                optional_dependencies: BTreeMap::new(),
             },
         );
         lockfile.packages.insert(
