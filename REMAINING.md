@@ -3,6 +3,10 @@
 Status of the Rust package manager as of **2026-10-24**, and the ordered list of work needed to finalize it.
 Work through tasks top to bottom: each phase unblocks the next. Tick a task's box when it is merged.
 
+**Known-bug tests:** every open bug that has a scenario is an `#[ignore = "fixed by <task>: …"]` end-to-end test in
+`apps/craft/tests/e2e/`. `cargo test -p craft --test e2e -- --ignored` lists what's still broken; when a task
+lands, delete the `#[ignore]` on its tests.
+
 Legend: **P0** broken installs / crashes · **P1** wrong behaviour · **P2** performance, DX, hygiene ·
 ✅ reproduced against the real binary · 📖 found by code reading
 
@@ -31,7 +35,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | **Phase 0 — Foundations** | | | |
 | 0.1 | Explicit `Context` (cwd + `CRAFT_HOME`) instead of process-global env/cwd | P2 | [x] |
 | 0.2 | Test isolation: no real installs or env mutation in unit tests | P2 | [x] |
-| 0.3 | Mock registry + end-to-end test harness | P2 | [ ] |
+| 0.3 | Mock registry + end-to-end test harness | P2 | [x] |
 | 0.4 | Lint/CI hygiene (`clippy --all-targets`, fmt, workspace lints, dead code) | P2 | [ ] |
 | **Phase 1 — Correctness fixes (current layout)** | | | |
 | 1.1 | Dependency spec classification — no more panics | P0 | [ ] |
@@ -120,7 +124,9 @@ Do these first: every later fix needs a fast, offline, isolated way to prove it 
 
 **Done when** `cargo test` works offline and leaves `git status` and `~/.craft` untouched.
 
-### 0.3 Mock registry + end-to-end harness · P2
+### 0.3 Mock registry + end-to-end harness · P2 — ✔ done
+
+> Done: `CRAFT_REGISTRY` / `Context::with_registry` make the registry configurable. `crates/testkit` provides `MockRegistry` (a `tiny_http` server on `127.0.0.1` serving packuments, tarballs and npm-style 404s, recording request paths) and `PackageFixture` (builds tarballs in memory with real `sha512` integrity, configurable root dir, bins, peer/optional deps; its default `index.js` requires its dependencies so `require()` proves the subtree resolves). `apps/craft/tests/e2e/` runs the real binary per test in a tempdir project + craft home: 20 passing scenarios and 23 `#[ignore]`d known-bug scenarios, each confirmed to fail today for the documented reason. CI installs Node 22 for these tests.
 
 **Fix**
 - Make the registry base URL configurable (`Context.registry`, default `https://registry.npmjs.org`) — also needed by 5.7.
