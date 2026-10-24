@@ -1,3 +1,3 @@
-pub mod progress;
+mod progress;
 
-pub use progress::{Progress, ProgressMessage};
+pub use progress::{OutputMode, Reporter};
