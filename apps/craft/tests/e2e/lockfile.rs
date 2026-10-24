@@ -1,3 +1,4 @@
+use predicates::str::contains;
 use serde_json::{Value, json};
 use testkit::{MockRegistry, PackageFixture};
 
@@ -392,4 +393,43 @@ fn craft_ci_reinstalls_from_scratch() {
         project.require("debug").expect("debug loads")["dependencies"]["ms"],
         "2.1.3"
     );
+}
+
+#[test]
+fn rejects_a_lockfile_from_a_newer_craft() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+    project.write_file(
+        "craft.lock",
+        r#"{ "lockfileVersion": 99, "importers": {}, "packages": {} }"#,
+    );
+
+    project
+        .craft()
+        .arg("install")
+        .assert()
+        .failure()
+        .stderr(contains(
+            "craft.lock has lockfileVersion 99, but this craft reads up to 1; upgrade craft",
+        ));
+    assert!(registry.requested_paths().is_empty());
+}
+
+#[test]
+fn names_a_corrupt_lockfile_and_where_it_breaks() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+    project.write_file("craft.lock", "<<<<<<< HEAD\n{}\n");
+
+    project
+        .craft()
+        .arg("install")
+        .assert()
+        .failure()
+        .stderr(contains("failed to read "))
+        .stderr(contains(
+            "craft.lock\n  caused by: expected value at line 1 column 1",
+        ));
 }
