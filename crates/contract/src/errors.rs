@@ -122,8 +122,11 @@ pub enum PlatformError {
 
 #[derive(Error, Debug)]
 pub enum PackageError {
-    #[error("no package.json found")]
+    #[error("no package.json found; run `craft init` to create one")]
     NoPackageJson,
+
+    #[error("package.json already exists")]
+    AlreadyExists,
 
     #[error("package.json must contain a JSON object")]
     NotAnObject,
