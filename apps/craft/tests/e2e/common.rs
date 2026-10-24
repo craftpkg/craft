@@ -148,3 +148,40 @@ impl Project {
         project
     }
 }
+
+/// A script printing `text`, the same under `sh` and `cmd`, whose `echo` differs in quoting and
+/// line endings.
+pub fn print_script(text: &str) -> String {
+    format!("node -e \"console.log('{text}')\"")
+}
+
+/// A script appending `text` and a newline to `file` in the current directory.
+pub fn append_script(file: &str, text: &str) -> String {
+    format!("node -e \"require('fs').appendFileSync('{file}', '{text}\\n')\"")
+}
+
+/// A script creating an empty `file` in the current directory.
+pub fn create_file_script(file: &str) -> String {
+    format!("node -e \"require('fs').writeFileSync('{file}', '')\"")
+}
+
+impl Project {
+    /// Writes `print.js`, which prints its arguments separated by spaces, for scripts such as
+    /// `node print.js test` that also receive arguments from the command line.
+    pub fn with_print_script(self) -> Self {
+        self.write_file(
+            "print.js",
+            "console.log(process.argv.slice(2).join(' '));\n",
+        );
+        self
+    }
+}
+
+/// Runs one of craft's async helpers from a synchronous test.
+pub fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime")
+        .block_on(future)
+}
