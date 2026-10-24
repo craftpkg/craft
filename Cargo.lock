@@ -1270,6 +1270,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "contract",
+ "fsutil",
  "node-semver",
  "serde",
  "serde_json",
@@ -1866,6 +1867,7 @@ dependencies = [
 name = "tarball"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "contract",
  "flate2",
  "tar",
