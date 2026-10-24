@@ -3,7 +3,7 @@ use anyhow::Result;
 use contract::{NetworkError, RegistryError};
 use network::{Integrity, Network};
 use node_semver::{Range, Version};
-use package::{NpmPackage, VersionRequirement};
+use package::{NpmPackage, PlatformConstraints, VersionRequirement};
 
 #[derive(Debug)]
 pub struct NpmResolver {
@@ -51,6 +51,7 @@ impl NpmResolver {
                 tarball_url: dist.tarball.clone(),
             },
             integrity: Integrity::from_dist(dist.integrity.as_deref(), dist.shasum.as_deref())?,
+            platform: PlatformConstraints::from_manifest(pkg_json),
             package: Some(pkg_json.clone()),
         };
 
