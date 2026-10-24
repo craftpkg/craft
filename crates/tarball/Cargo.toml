@@ -10,5 +10,5 @@ workspace = true
 flate2 = "1.0"
 tar = "0.4"
 contract = { path = "../contract" }
-tokio = { version = "1.48.0", features = ["rt", "macros"] }
+tokio = { version = "1.48.0", features = ["rt", "macros", "sync"] }
 tempfile = "3.10"
