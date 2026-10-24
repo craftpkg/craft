@@ -370,3 +370,61 @@ fn updates_within_the_specifier_without_touching_package_json() {
         .failure()
         .stderr(contains("lodash is not a dependency of this project"));
 }
+
+#[test]
+fn reports_errors_with_their_causes() {
+    let registry = MockRegistry::start();
+    let project = Project::new(&registry, json!({ "dependencies": { "ghost": "^1.0.0" } }));
+
+    project
+        .craft()
+        .arg("install")
+        .assert()
+        .failure()
+        .stderr(format!(
+            "error: failed to install ghost@^1.0.0\n  caused by: package ghost not found in {}\n",
+            registry.url()
+        ));
+}
+
+#[test]
+fn says_when_the_registry_cannot_be_reached() {
+    let registry = MockRegistry::start();
+    let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+    project.write_file(".npmrc", "fetch-retries=0\n");
+
+    let mut command = assert_cmd::Command::from_std(project.craft_process());
+    command
+        .arg("install")
+        .env("CRAFT_REGISTRY", "http://127.0.0.1:9")
+        .assert()
+        .failure()
+        .stderr(contains("could not reach 127.0.0.1:9 ("))
+        .stderr(contains("or use --offline"));
+}
+
+#[cfg(unix)]
+#[test]
+fn names_the_path_and_hints_on_permission_errors() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let registry = MockRegistry::start();
+    publish_summary_packages(&registry);
+    let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+    std::fs::set_permissions(project.path(), std::fs::Permissions::from_mode(0o555))
+        .expect("make the project read-only");
+    let is_enforced = std::fs::write(project.path().join("probe"), "").is_err();
+
+    let assert = project.craft().arg("install").assert();
+    std::fs::set_permissions(project.path(), std::fs::Permissions::from_mode(0o755))
+        .expect("restore permissions");
+    if !is_enforced {
+        return;
+    }
+
+    assert
+        .failure()
+        .stderr(contains("could not create directory"))
+        .stderr(contains("node_modules: Permission denied"))
+        .stderr(contains("hint: check that you may write to the path above"));
+}
