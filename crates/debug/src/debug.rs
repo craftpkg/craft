@@ -7,7 +7,7 @@ const WORKSPACE_CRATES: [&str; 11] = [
 ];
 
 /// Initialize the debug logging system
-/// This should be called once at the start of the application if verbose logging is desired
+/// This should be called once at the start of the application if debug logging is desired
 pub fn init() {
     use tracing_subscriber::{EnvFilter, fmt};
 
