@@ -1,4 +1,4 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
 use contract::{Actor, Context, Result};
 use package::{DependencySection, ProjectManifest};
@@ -81,28 +81,14 @@ async fn remove_bins(node_modules: &Path, package_name: &str) -> Result<Vec<Stri
         let Ok(target) = fs::read_link(entry.path()).await else {
             continue;
         };
-        let is_package_bin = normalize_lexically(&bin_dir.join(target)).starts_with(&package_dir);
+        let is_package_bin =
+            fsutil::normalize_lexically(&bin_dir.join(target)).starts_with(&package_dir);
         if is_package_bin {
             fsutil::remove_entry(&entry.path()).await?;
             removed.push(entry.file_name().to_string_lossy().into_owned());
         }
     }
     Ok(removed)
-}
-
-/// Resolves `.` and `..` without touching the filesystem, since the target may already be gone.
-fn normalize_lexically(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            other => normalized.push(other),
-        }
-    }
-    normalized
 }
 
 #[cfg(test)]
@@ -129,14 +115,6 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(!test_package.exists());
-    }
-
-    #[test]
-    fn test_normalize_lexically() {
-        assert_eq!(
-            normalize_lexically(Path::new("/app/node_modules/.bin/../cowsay/./cli.js")),
-            PathBuf::from("/app/node_modules/cowsay/cli.js")
-        );
     }
 
     #[cfg(unix)]
