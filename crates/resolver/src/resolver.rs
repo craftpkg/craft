@@ -29,7 +29,7 @@ pub struct Resolver {
 impl Resolver {
     pub fn new(context: &Context) -> Self {
         Self {
-            npm_resolver: NpmResolver::new(context.registry.clone()),
+            npm_resolver: NpmResolver::new(context.registry.clone(), context.metadata_cache_dir()),
             locked: LockPreferences::default(),
             is_frozen: false,
             network: Network::new(&context.registry),
