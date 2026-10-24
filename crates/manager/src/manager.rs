@@ -1,6 +1,6 @@
 use actor::{
     AddActorPayload, AddPackageActor, CleanCacheActor, CleanCacheActorPayload, InstallActor,
-    RemoveActorPayload, RemovePackageActor, RunScriptActor, RunScriptActorPayload,
+    InstallOptions, RemoveActorPayload, RemovePackageActor, RunScriptActor, RunScriptActorPayload,
 };
 use cli::{Action, CacheCommands};
 use contract::{Actor, Context};
@@ -51,7 +51,20 @@ impl CraftManager {
                         .await
                 }
             },
-            Action::Install => InstallActor::with(context, ()).run().await,
+            Action::Install { frozen_lockfile } => {
+                let options = InstallOptions {
+                    frozen_lockfile,
+                    clean: false,
+                };
+                InstallActor::with(context, options).run().await
+            }
+            Action::Ci => {
+                let options = InstallOptions {
+                    frozen_lockfile: true,
+                    clean: true,
+                };
+                InstallActor::with(context, options).run().await
+            }
         }
     }
 }
@@ -107,7 +120,9 @@ mod tests {
         let temp_dir = tempfile::tempdir()?;
 
         let result = temp_manager(&temp_dir)
-            .handle_command(Action::Install)
+            .handle_command(Action::Install {
+                frozen_lockfile: false,
+            })
             .await;
 
         let error = result.err().map(|e| e.to_string());
