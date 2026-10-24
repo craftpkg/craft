@@ -42,6 +42,11 @@ pub enum ArtifactSource {
     Link {
         path: PathBuf,
     },
+    /// A git repository pinned to a commit, cached by repository and commit.
+    Git {
+        url: String,
+        sha: String,
+    },
 }
 
 impl ResolvedArtifact {
@@ -61,6 +66,9 @@ impl ResolvedArtifact {
             ArtifactSource::Link { path } => {
                 NodeId::new(&self.name, &format!("link:{}", path.display()))
             }
+            ArtifactSource::Git { url, sha } => {
+                NodeId::new(&self.name, &format!("git+{url}#{sha}"))
+            }
         }
     }
 
@@ -79,6 +87,7 @@ impl ResolvedArtifact {
             ArtifactSource::Directory { path } => {
                 source_cache_dir(context, "file", &path.display().to_string())
             }
+            ArtifactSource::Git { url, sha } => git_package_dir(context, url, sha),
         }
     }
 }
@@ -93,6 +102,10 @@ pub(crate) fn source_hash(key: &str) -> String {
     let digest = Sha256::digest(key.as_bytes());
     let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
     hex[..SOURCE_HASH_LENGTH].to_string()
+}
+
+pub(crate) fn git_package_dir(context: &Context, url: &str, sha: &str) -> PathBuf {
+    source_cache_dir(context, "git", &format!("{url}#{sha}"))
 }
 
 /// Named by source rather than package, since a tarball's name is only known once extracted.
