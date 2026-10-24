@@ -10,6 +10,8 @@ pub struct Context {
     pub craft_home: PathBuf,
     pub registry: String,
     pub verbose: bool,
+    /// Whether craft runs in CI (`CI` is set and not `0`/`false`), where installs are frozen.
+    pub ci: bool,
 }
 
 impl Context {
@@ -19,6 +21,7 @@ impl Context {
             craft_home,
             registry: DEFAULT_REGISTRY.to_string(),
             verbose,
+            ci: false,
         }
     }
 
@@ -28,7 +31,10 @@ impl Context {
         let cwd = std::env::current_dir()?;
         let user_home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
         let craft_home = resolve_craft_home(std::env::var_os(CRAFT_HOME), user_home)?;
-        let context = Self::new(cwd, craft_home, verbose);
+        let context = Self {
+            ci: is_ci(std::env::var("CI").ok().as_deref()),
+            ..Self::new(cwd, craft_home, verbose)
+        };
 
         match std::env::var(CRAFT_REGISTRY) {
             Ok(registry) if !registry.is_empty() => Ok(context.with_registry(&registry)),
@@ -58,6 +64,12 @@ impl Context {
     pub fn package_json_path(&self) -> PathBuf {
         self.cwd.join("package.json")
     }
+}
+
+fn is_ci(value: Option<&str>) -> bool {
+    let value = value.unwrap_or_default().trim();
+    let is_disabled = value.is_empty() || value == "0" || value.eq_ignore_ascii_case("false");
+    !is_disabled
 }
 
 fn resolve_craft_home(
@@ -97,6 +109,16 @@ mod tests {
         let craft_home = resolve_craft_home(Some("".into()), Some("/home/me".into()))?;
         assert_eq!(craft_home, PathBuf::from("/home/me/.craft"));
         Ok(())
+    }
+
+    #[test]
+    fn test_ci_detection() {
+        assert!(is_ci(Some("true")));
+        assert!(is_ci(Some("1")));
+        assert!(!is_ci(Some("false")));
+        assert!(!is_ci(Some("0")));
+        assert!(!is_ci(Some("")));
+        assert!(!is_ci(None));
     }
 
     #[test]
