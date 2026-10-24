@@ -22,6 +22,7 @@ impl CraftManager {
                 packages,
                 dev,
                 exact,
+                ignore_scripts,
             } => {
                 AddPackageActor::with(
                     context,
@@ -29,6 +30,7 @@ impl CraftManager {
                         packages,
                         is_dev: dev,
                         is_exact: exact,
+                        ignore_scripts,
                     },
                 )
                 .run()
@@ -51,17 +53,22 @@ impl CraftManager {
                         .await
                 }
             },
-            Action::Install { frozen_lockfile } => {
+            Action::Install {
+                frozen_lockfile,
+                ignore_scripts,
+            } => {
                 let options = InstallOptions {
                     frozen_lockfile,
                     clean: false,
+                    ignore_scripts,
                 };
                 InstallActor::with(context, options).run().await
             }
-            Action::Ci => {
+            Action::Ci { ignore_scripts } => {
                 let options = InstallOptions {
                     frozen_lockfile: true,
                     clean: true,
+                    ignore_scripts,
                 };
                 InstallActor::with(context, options).run().await
             }
@@ -122,6 +129,7 @@ mod tests {
         let result = temp_manager(&temp_dir)
             .handle_command(Action::Install {
                 frozen_lockfile: false,
+                ignore_scripts: false,
             })
             .await;
 
