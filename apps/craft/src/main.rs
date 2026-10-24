@@ -51,13 +51,35 @@ fn output_mode(cli: &Cli, ci: bool) -> OutputMode {
 }
 
 /// A failed script already printed its own output, so craft adds one line and exits with the
-/// script's code; any other error prints its full cause chain.
+/// script's code; any other error prints its cause chain and, when one applies, a hint.
 fn report(error: &anyhow::Error) -> ExitCode {
     if let Some(ScriptError::Failed { code, .. }) = error.downcast_ref::<ScriptError>() {
         eprintln!("error: {error}");
         return ExitCode::from(u8::try_from(*code).unwrap_or(1));
     }
 
-    eprintln!("Error: {error:?}");
+    eprintln!("error: {error}");
+    for cause in error.chain().skip(1) {
+        eprintln!("  caused by: {cause}");
+    }
+    if let Some(hint) = hint(error) {
+        eprintln!("  hint: {hint}");
+    }
     ExitCode::FAILURE
+}
+
+/// Advice for failures with a common, fixable cause.
+fn hint(error: &anyhow::Error) -> Option<&'static str> {
+    error.chain().find_map(|cause| {
+        let io_error = cause.downcast_ref::<std::io::Error>()?;
+        match io_error.kind() {
+            std::io::ErrorKind::PermissionDenied => {
+                Some("check that you may write to the path above, or run craft as its owner")
+            }
+            std::io::ErrorKind::StorageFull => {
+                Some("the disk is full; `craft cache clean --force` frees the global store")
+            }
+            _ => None,
+        }
+    })
 }
