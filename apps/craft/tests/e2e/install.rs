@@ -98,6 +98,34 @@ fn installs_cyclic_dependencies() {
 }
 
 #[test]
+fn fetches_each_package_metadata_once() {
+    let registry = MockRegistry::start();
+    registry
+        .publish(PackageFixture::new("ms", "2.0.0"))
+        .publish(PackageFixture::new("ms", "2.1.3"))
+        .publish(PackageFixture::new("a", "1.0.0").dependency("ms", "^2.0.0"))
+        .publish(PackageFixture::new("b", "1.0.0").dependency("ms", "~2.1.0"))
+        .publish(PackageFixture::new("c", "1.0.0").dependency("ms", "2.0.0"));
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "a": "^1.0.0", "b": "^1.0.0", "c": "^1.0.0", "ms": "*" } }),
+    );
+
+    project.craft().arg("install").assert().success();
+
+    let ms_metadata_requests = registry
+        .requested_paths()
+        .iter()
+        .filter(|path| path.as_str() == "/ms")
+        .count();
+    assert_eq!(ms_metadata_requests, 1);
+    assert_eq!(
+        project.require("c").expect("c loads")["dependencies"]["ms"],
+        "2.0.0"
+    );
+}
+
+#[test]
 fn downloads_each_version_once_for_overlapping_ranges() {
     let registry = MockRegistry::start();
     registry
