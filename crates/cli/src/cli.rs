@@ -29,6 +29,9 @@ pub enum Commands {
         /// Save the exact resolved version instead of a caret range.
         #[arg(short = 'E', long)]
         exact: bool,
+        /// Run no lifecycle scripts.
+        #[arg(long)]
+        ignore_scripts: bool,
     },
     Remove {
         #[arg(required = true)]
@@ -50,9 +53,16 @@ pub enum Commands {
         /// On by default when the CI environment variable is set.
         #[arg(long)]
         frozen_lockfile: bool,
+        /// Run no lifecycle scripts.
+        #[arg(long)]
+        ignore_scripts: bool,
     },
     /// Remove node_modules and install exactly what craft.lock records.
-    Ci,
+    Ci {
+        /// Run no lifecycle scripts.
+        #[arg(long)]
+        ignore_scripts: bool,
+    },
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -79,6 +89,7 @@ pub enum Action {
         packages: Vec<String>,
         dev: bool,
         exact: bool,
+        ignore_scripts: bool,
     },
     Remove {
         packages: Vec<String>,
@@ -92,8 +103,11 @@ pub enum Action {
     },
     Install {
         frozen_lockfile: bool,
+        ignore_scripts: bool,
     },
-    Ci,
+    Ci {
+        ignore_scripts: bool,
+    },
 }
 
 impl Cli {
@@ -105,6 +119,7 @@ impl Cli {
         let Some(command) = &self.command else {
             return Action::Install {
                 frozen_lockfile: false,
+                ignore_scripts: false,
             };
         };
 
@@ -113,10 +128,12 @@ impl Cli {
                 packages,
                 dev,
                 exact,
+                ignore_scripts,
             } => Action::Add {
                 packages: packages.clone(),
                 dev: *dev,
                 exact: *exact,
+                ignore_scripts: *ignore_scripts,
             },
             Commands::Remove { packages } => Action::Remove {
                 packages: packages.clone(),
@@ -130,14 +147,21 @@ impl Cli {
             },
             Commands::Start => run_script("start", &[]),
             Commands::Test => run_script("test", &[]),
-            Commands::Install { frozen_lockfile } => Action::Install {
+            Commands::Install {
+                frozen_lockfile,
+                ignore_scripts,
+            } => Action::Install {
                 frozen_lockfile: *frozen_lockfile,
+                ignore_scripts: *ignore_scripts,
             },
-            Commands::Ci => Action::Ci,
+            Commands::Ci { ignore_scripts } => Action::Ci {
+                ignore_scripts: *ignore_scripts,
+            },
             Commands::External(args) => match args.split_first() {
                 Some((script, args)) => run_script(script, args),
                 None => Action::Install {
                     frozen_lockfile: false,
+                    ignore_scripts: false,
                 },
             },
         }
@@ -176,6 +200,7 @@ mod tests {
                 packages: vec!["ms".to_string()],
                 dev: false,
                 exact: true,
+                ignore_scripts: false,
             }
         );
     }
@@ -239,7 +264,8 @@ mod tests {
         assert_eq!(
             normalized,
             Action::Install {
-                frozen_lockfile: false
+                frozen_lockfile: false,
+                ignore_scripts: false,
             }
         );
     }
@@ -310,10 +336,16 @@ mod tests {
         assert_eq!(
             frozen.normalize(),
             Action::Install {
-                frozen_lockfile: true
+                frozen_lockfile: true,
+                ignore_scripts: false,
             }
         );
-        assert_eq!(Cli::parse_from(["craft", "ci"]).normalize(), Action::Ci);
+        assert_eq!(
+            Cli::parse_from(["craft", "ci", "--ignore-scripts"]).normalize(),
+            Action::Ci {
+                ignore_scripts: true
+            }
+        );
     }
 
     #[test]
@@ -326,7 +358,8 @@ mod tests {
         assert_eq!(
             normalized,
             Action::Install {
-                frozen_lockfile: false
+                frozen_lockfile: false,
+                ignore_scripts: false,
             }
         );
     }
