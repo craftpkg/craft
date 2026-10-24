@@ -1,5 +1,6 @@
 use crate::ResolvedArtifact;
 use anyhow::Result;
+use contract::{NetworkError, RegistryError};
 use network::Network;
 use node_semver::{Range, Version};
 use package::{NpmPackage, VersionRequirement};
@@ -24,13 +25,11 @@ impl NpmResolver {
         requirement: &VersionRequirement,
     ) -> Result<ResolvedArtifact> {
         let url = format!("{}/{}", self.registry, name);
-        let npm_package = match self.client.fetch::<NpmPackage>(&url).await {
-            Ok(package) => package,
-            Err(e) => {
-                debug::error!("Failed to fetch npm package: {} {}", url, e);
-                return Err(e);
-            }
-        };
+        let npm_package = self
+            .client
+            .fetch::<NpmPackage>(&url)
+            .await
+            .map_err(|error| registry_error(name, &self.registry, error))?;
 
         let version = select_version(&npm_package, requirement)
             .ok_or_else(|| anyhow::anyhow!("no version of {name} matches {requirement}"))?;
@@ -55,6 +54,26 @@ impl NpmResolver {
         debug::trace!("Resolved {name}@{requirement} to {version}");
 
         Ok(resolved)
+    }
+}
+
+fn registry_error(name: &str, registry: &str, error: anyhow::Error) -> anyhow::Error {
+    let status = match error.downcast_ref::<NetworkError>() {
+        Some(NetworkError::Status { status, .. }) => *status,
+        None => return error.context(format!("failed to fetch {name} from {registry}")),
+    };
+    let name = name.to_string();
+    let registry = registry.to_string();
+
+    match status {
+        404 => RegistryError::PackageNotFound { name, registry }.into(),
+        401 | 403 => RegistryError::AccessDenied {
+            name,
+            registry,
+            status,
+        }
+        .into(),
+        _ => error.context(format!("failed to fetch {name} from {registry}")),
     }
 }
 
@@ -188,6 +207,31 @@ mod tests {
             .resolve("invalid-package-name-12345", &requirement("latest"))
             .await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_registry_errors_name_the_package() {
+        let registry = "http://registry.test";
+        let message = |status: u16| {
+            let error = NetworkError::Status {
+                url: format!("{registry}/pkg"),
+                status,
+            };
+            registry_error("pkg", registry, error.into()).to_string()
+        };
+
+        assert_eq!(
+            message(404),
+            "package pkg not found in http://registry.test"
+        );
+        assert_eq!(
+            message(403),
+            "http://registry.test denied access to pkg (HTTP 403); check your registry credentials"
+        );
+        assert_eq!(
+            message(500),
+            "failed to fetch pkg from http://registry.test"
+        );
     }
 
     fn select(npm_package: &NpmPackage, spec: &str) -> Option<String> {
