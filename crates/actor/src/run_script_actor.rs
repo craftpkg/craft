@@ -9,6 +9,8 @@ use process::{Process, ScriptPackage};
 pub struct RunScriptActorPayload {
     pub script: String,
     pub args: Vec<String>,
+    /// Run a dependency bin only, never a package.json script (`craft exec`).
+    pub bin_only: bool,
 }
 
 impl std::fmt::Display for RunScriptActorPayload {
@@ -37,13 +39,17 @@ impl Actor<RunScriptActorPayload> for RunScriptActor {
             .and_then(|manifest| manifest.scripts.clone())
             .unwrap_or_default();
 
-        if scripts.contains_key(name) {
+        let runs_script = !self.payload.bin_only && scripts.contains_key(name);
+        if runs_script {
             return self.run_lifecycle(name, &scripts, manifest.as_ref()).await;
         }
         if let Some(bin) = find_bin(&self.context.cwd, name) {
             debug::info!("Running bin {}", bin.display());
             let process = Process::new(&bin).args(&self.payload.args);
             return self.run_process(name, process, manifest.as_ref()).await;
+        }
+        if self.payload.bin_only {
+            return Err(ScriptError::BinNotFound { name: name.clone() }.into());
         }
 
         let mut available: Vec<String> = scripts.into_keys().collect();
@@ -201,6 +207,7 @@ mod tests {
         let payload = RunScriptActorPayload {
             script: "echo".to_string(),
             args: vec!["test".to_string()],
+            bin_only: false,
         };
 
         assert_eq!(format!("{}", payload), "echo test");
@@ -211,6 +218,7 @@ mod tests {
         let payload = RunScriptActorPayload {
             script: "craft".to_string(),
             args: vec!["test".to_string()],
+            bin_only: false,
         };
 
         let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false);
