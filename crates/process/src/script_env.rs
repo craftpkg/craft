@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::path::Path;
 
-use contract::{CRAFT_VERSION, Result, node_cpu, node_os};
+use contract::{Result, user_agent};
 
 use crate::Process;
 
@@ -49,14 +49,6 @@ pub fn script_path(dir: &Path) -> Result<OsString> {
     Ok(path)
 }
 
-/// npm's format (`<manager>/<version> <platform> <arch>`), which tools read to detect the
-/// package manager that started them.
-pub fn user_agent() -> String {
-    let platform = node_os(std::env::consts::OS);
-    let arch = node_cpu(std::env::consts::ARCH);
-    format!("craft/{CRAFT_VERSION} {platform} {arch}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,10 +66,5 @@ mod tests {
                 PathBuf::from("/node_modules/.bin"),
             ]
         );
-    }
-
-    #[test]
-    fn test_user_agent_names_craft() {
-        assert!(user_agent().starts_with(&format!("craft/{CRAFT_VERSION} ")));
     }
 }
