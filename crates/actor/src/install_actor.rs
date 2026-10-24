@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
 use contract::{Actor, Context, Pipeline, Result};
+use lockfile::Lockfile;
 use package::{InstallPackage, PackageJson};
-use pipeline::{InstallPipe, LinkerPipe, lockfile_from_graph};
-use resolver::ResolutionGraph;
+use pipeline::{InstallPipe, LinkerPipe};
+
+use crate::lock_state::{is_up_to_date, save_lockfile, with_lock_preference};
 
 pub struct InstallActor {
     context: Context,
@@ -16,25 +18,25 @@ impl Actor<()> for InstallActor {
 
     async fn run(&self) -> Result<()> {
         let package_json = PackageJson::from_file(&self.context.package_json_path()).await?;
-        let packages = manifest_packages(&package_json);
+        let lockfile = Lockfile::load(&self.context.cwd).await?;
+        if is_up_to_date(&self.context, lockfile.as_ref(), &package_json).await {
+            println!("Already up to date");
+            return Ok(());
+        }
+
+        let packages: Vec<InstallPackage> = manifest_packages(&package_json)
+            .into_iter()
+            .map(|package| with_lock_preference(lockfile.as_ref(), package))
+            .collect();
         debug::trace!("Installing packages from package.json: {packages:?}");
 
-        let graph = InstallPipe::new(&self.context, packages).run().await?;
+        let graph = InstallPipe::new(&self.context, packages)
+            .with_lockfile(lockfile.as_ref())
+            .run()
+            .await?;
         LinkerPipe::new(&self.context, graph.clone()).run().await?;
         save_lockfile(&self.context, &graph, &manifest_specifiers(&package_json)).await
     }
-}
-
-/// Records `graph` in `craft.lock`, rewriting it only when something changed.
-pub(crate) async fn save_lockfile(
-    context: &Context,
-    graph: &ResolutionGraph,
-    specifiers: &HashMap<String, String>,
-) -> Result<()> {
-    lockfile_from_graph(graph, specifiers, &context.cwd)
-        .save(&context.cwd)
-        .await?;
-    Ok(())
 }
 
 /// Each declared dependency's spec as package.json lists it.
