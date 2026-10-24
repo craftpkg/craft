@@ -3,6 +3,8 @@ use package::PackageJson;
 use pipeline::{LifecyclePipe, ScriptPolicy, run_project_scripts};
 use resolver::ResolutionGraph;
 
+use crate::summary::packages;
+
 /// Dependencies may run install scripts only when package.json lists them in
 /// `trustedDependencies`; `--ignore-scripts` turns all scripts off.
 pub(crate) fn script_policy(package_json: &PackageJson, ignore_scripts: bool) -> ScriptPolicy {
@@ -25,11 +27,11 @@ pub(crate) async fn run_install_scripts(
         .run()
         .await?;
     if !report.skipped.is_empty() {
-        eprintln!(
-            "warning: skipped install scripts of {} not in trustedDependencies: {}\n  to allow them, add their names to \"trustedDependencies\" in package.json and run `craft install`",
-            plural(report.skipped.len()),
+        context.reporter.warn(format!(
+            "skipped install scripts of {} not in trustedDependencies: {}\n  to allow them, add their names to \"trustedDependencies\" in package.json and run `craft install`",
+            packages(report.skipped.len()),
             report.skipped.join(", ")
-        );
+        ));
     }
 
     let runs_project_scripts = include_project && !policy.ignore_scripts;
@@ -37,11 +39,4 @@ pub(crate) async fn run_install_scripts(
         run_project_scripts(context, package_json).await?;
     }
     Ok(())
-}
-
-fn plural(count: usize) -> String {
-    match count {
-        1 => "1 package".to_string(),
-        count => format!("{count} packages"),
-    }
 }
