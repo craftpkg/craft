@@ -1,7 +1,9 @@
 use contract::{Actor, Context, Pipeline};
-use package::{DependencySection, InstallPackage, ProjectManifest};
+use package::{DependencySection, InstallPackage, PackageJson, ProjectManifest};
 use pipeline::{InstallPipe, LinkerPipe};
 use resolver::{ArtifactSource, Edge, ResolvedArtifact};
+
+use crate::install_actor::manifest_packages;
 
 #[derive(Debug)]
 pub struct AddActorPayload {
@@ -26,16 +28,33 @@ impl Actor<AddActorPayload> for AddPackageActor {
         Self { context, payload }
     }
 
+    /// Installs the added packages together with everything the project already depends on,
+    /// so the result is a complete install that pruning can trust.
     async fn run(&self) -> contract::Result<()> {
-        let mut manifest = ProjectManifest::open(&self.context.package_json_path()).await?;
+        let package_json_path = self.context.package_json_path();
+        let mut manifest = ProjectManifest::open(&package_json_path).await?;
+        let package_json = PackageJson::from_file(&package_json_path).await?;
 
-        let packages = self
+        let added: Vec<InstallPackage> = self
             .payload
             .packages
             .iter()
             .map(|literal| InstallPackage::from_literal(literal, self.payload.is_dev))
             .collect();
-        let graph = InstallPipe::new(&self.context, packages).run().await?;
+        let existing: Vec<InstallPackage> = manifest_packages(&package_json)
+            .into_iter()
+            .filter(|package| !added.iter().any(|added| added.name == package.name))
+            .collect();
+        let existing_count = existing.len();
+
+        let mut graph = InstallPipe::new(&self.context, [existing, added].concat())
+            .run()
+            .await?;
+        let added_roots = graph.roots.split_off(existing_count);
+        graph
+            .roots
+            .retain(|root| !added_roots.iter().any(|added| added.name == root.name));
+        graph.roots.extend(added_roots.iter().cloned());
         LinkerPipe::new(&self.context, graph.clone()).run().await?;
 
         let section = if self.payload.is_dev {
@@ -43,7 +62,7 @@ impl Actor<AddActorPayload> for AddPackageActor {
         } else {
             DependencySection::Dependencies
         };
-        for root in &graph.roots {
+        for root in &added_roots {
             let spec = saved_spec(root, &graph.target(root)?.artifact, self.payload.is_exact);
             debug::info!("Saving {}@{}", root.name, spec);
             save_dependency(&mut manifest, section, &root.name, &spec);
