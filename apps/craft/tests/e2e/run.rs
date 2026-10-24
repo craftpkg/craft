@@ -307,3 +307,57 @@ fn dlx_runs_a_named_bin_and_passes_its_exit_code() {
             "toolbox has no bin named toolbox; it provides: tool-a, tool-b",
         ));
 }
+
+#[test]
+fn exec_passes_arguments_and_the_exit_code() {
+    let registry = MockRegistry::start();
+    registry.publish(
+        PackageFixture::new("argv-tool", "1.0.0")
+            .file(
+                "cli.js",
+                "#!/usr/bin/env node\nconst args = process.argv.slice(2);\nconsole.log(args.join(' '));\nprocess.exit(Number(process.env.EXIT_CODE || 0));\n",
+            )
+            .manifest_field("bin", json!({ "argv-tool": "cli.js" })),
+    );
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "argv-tool": "1.0.0" } }),
+    );
+    project.craft().arg("install").assert().success();
+
+    project
+        .craft()
+        .args(["exec", "argv-tool", "--flag", "two words", "-x"])
+        .assert()
+        .success()
+        .stdout("--flag two words -x\n");
+
+    let mut command = assert_cmd::Command::from_std(project.craft_process());
+    command
+        .args(["exec", "argv-tool"])
+        .env("EXIT_CODE", "7")
+        .assert()
+        .code(7)
+        .stderr(contains("error: argv-tool exited with code 7"));
+}
+
+#[test]
+fn dlx_runs_scoped_packages_and_reuses_pinned_installs_offline() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("@acme/tool", "1.0.0").string_bin("cli.js"));
+    let project = Project::new(&registry, json!({}));
+
+    for args in [
+        vec!["dlx", "@acme/tool@1.0.0"],
+        vec!["--offline", "dlx", "@acme/tool@1.0.0"],
+        vec!["dlx", "@acme/tool"],
+        vec!["--offline", "dlx", "@acme/tool"],
+    ] {
+        project
+            .craft()
+            .args(&args)
+            .assert()
+            .success()
+            .stdout("tool @acme/tool@1.0.0\n");
+    }
+}
