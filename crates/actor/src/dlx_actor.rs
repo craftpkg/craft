@@ -55,7 +55,7 @@ impl Actor<DlxPayload> for DlxActor {
             Some(_) => self.payload.command.clone(),
             None => default_bin(&dir, &package.name).await?,
         };
-        let bin = dir.join("node_modules").join(".bin").join(&bin_name);
+        let bin = fsutil::bin_command(&dir.join("node_modules").join(".bin"), &bin_name);
         if !bin.is_file() {
             return Err(ScriptError::BinNotFound { name: bin_name }.into());
         }
