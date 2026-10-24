@@ -455,3 +455,62 @@ fn names_the_path_and_hints_on_permission_errors() {
         .stderr(contains("node_modules: Permission denied"))
         .stderr(contains("hint: check that you may write to the path above"));
 }
+
+#[test]
+fn list_and_why_need_a_lockfile() {
+    let registry = MockRegistry::start();
+    let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+
+    for args in [vec!["list"], vec!["why", "ms"]] {
+        project
+            .craft()
+            .args(&args)
+            .assert()
+            .failure()
+            .stderr("error: craft.lock is missing; run `craft install` to create it\n");
+    }
+}
+
+#[test]
+fn update_latest_keeps_each_specifiers_style() {
+    let registry = MockRegistry::start();
+    publish_summary_packages(&registry);
+    registry.publish(PackageFixture::new("ms", "2.0.0"));
+    registry.set_dist_tag("ms", "latest", "2.1.3");
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": {
+            "react": "~18.3.0",
+            "ms": "2.0.0",
+            "old-react": "npm:react@^18.0.0",
+        } }),
+    );
+    project.craft().arg("install").assert().success();
+
+    project
+        .craft()
+        .args(["update", "--latest", "ms"])
+        .assert()
+        .success()
+        .stdout(contains("~ ms 2.0.0 → 2.1.3"));
+    let package_json = project.package_json();
+    assert_eq!(package_json["dependencies"]["ms"], "2.1.3");
+    assert_eq!(package_json["dependencies"]["react"], "~18.3.0");
+
+    project.craft().args(["update", "-L"]).assert().success();
+    let package_json = project.package_json();
+    assert_eq!(package_json["dependencies"]["react"], "~19.2.0");
+    assert_eq!(
+        package_json["dependencies"]["old-react"],
+        "npm:react@^19.2.0"
+    );
+    assert_eq!(
+        project.required_version("old-react"),
+        Ok("19.2.0".to_string())
+    );
+    project
+        .craft()
+        .args(["install", "--frozen-lockfile"])
+        .assert()
+        .success();
+}
