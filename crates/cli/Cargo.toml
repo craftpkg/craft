@@ -7,4 +7,5 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+contract = { path = "../contract" }
 clap = { version = "4.5.53", features = ["derive"] }
