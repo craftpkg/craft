@@ -98,6 +98,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_react_latest() {
         let pkg = InstallPackage::new("react".to_string(), None, false);
         let resolver = NpmResolver::new();
@@ -114,6 +115,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_react_specific_version() {
         let pkg = InstallPackage::new("react".to_string(), Some("17.0.2".to_string()), false);
         let resolver = NpmResolver::new();
@@ -129,6 +131,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_invalid_package() {
         let pkg = InstallPackage::new("invalid-package-name-12345".to_string(), None, false);
         let resolver = NpmResolver::new();
@@ -137,6 +140,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_npm_alias() {
         // Test npm:package@version format (e.g., "wrap-ansi-cjs": "npm:wrap-ansi@^7.0.0")
         let pkg = InstallPackage::new(
