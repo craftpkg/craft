@@ -2,38 +2,50 @@ use std::collections::{BTreeMap, HashMap};
 
 use contract::{Context, Result};
 use lockfile::{LockedDependency, LockedSource, Lockfile};
-use package::{InstallPackage, PackageJson};
+use package::{DependencySection, InstallPackage, PackageJson};
 use pipeline::{INSTALLED_STATE, ScriptPolicy, VIRTUAL_STORE_DIR, lockfile_from_graph};
 use resolver::ResolutionGraph;
 
 use crate::install_actor::manifest_packages;
+
+/// Besides the lockfile, what decides whether `node_modules` is current: which install scripts
+/// may run, and whether dev dependencies were left out.
+pub(crate) struct InstallMode<'a> {
+    pub policy: &'a ScriptPolicy,
+    pub production: bool,
+}
 
 /// Records `graph` in craft.lock and marks `node_modules` as matching it.
 pub(crate) async fn save_lockfile(
     context: &Context,
     graph: &ResolutionGraph,
     specifiers: &HashMap<String, String>,
-    policy: &ScriptPolicy,
+    mode: &InstallMode<'_>,
 ) -> Result<Lockfile> {
     let lockfile = lockfile_from_graph(graph, specifiers, &context.cwd);
     lockfile.save(&context.cwd).await?;
-    mark_installed(context, &lockfile, policy).await?;
+    mark_installed(context, &lockfile, mode).await?;
     Ok(lockfile)
 }
 
 pub(crate) async fn mark_installed(
     context: &Context,
     lockfile: &Lockfile,
-    policy: &ScriptPolicy,
+    mode: &InstallMode<'_>,
 ) -> Result<()> {
     let marker = installed_state_path(context);
-    fsutil::write_if_changed(&marker, installed_state(lockfile, policy)?.as_bytes()).await?;
+    fsutil::write_if_changed(&marker, installed_state(lockfile, mode)?.as_bytes()).await?;
     Ok(())
 }
 
-/// The lockfile plus the script policy: changing either means the next install has work to do.
-fn installed_state(lockfile: &Lockfile, policy: &ScriptPolicy) -> Result<String> {
-    Ok(format!("{}{}\n", lockfile.render()?, policy.describe()))
+/// The lockfile plus the install mode: changing any of them means the next install has work.
+fn installed_state(lockfile: &Lockfile, mode: &InstallMode<'_>) -> Result<String> {
+    let omitted = if mode.production { "omit: dev\n" } else { "" };
+    Ok(format!(
+        "{}{}\n{omitted}",
+        lockfile.render()?,
+        mode.policy.describe()
+    ))
 }
 
 /// Whether the lockfile may answer `package`: only while package.json still lists it with
@@ -56,7 +68,7 @@ pub(crate) async fn is_up_to_date(
     context: &Context,
     lockfile: Option<&Lockfile>,
     package_json: &PackageJson,
-    policy: &ScriptPolicy,
+    mode: &InstallMode<'_>,
 ) -> bool {
     let Some(lockfile) = lockfile else {
         return false;
@@ -73,7 +85,7 @@ pub(crate) async fn is_up_to_date(
 
     let marker = installed_state_path(context);
     let installed = tokio::fs::read_to_string(&marker).await.ok();
-    let current = installed_state(lockfile, policy).ok();
+    let current = installed_state(lockfile, mode).ok();
     installed.is_some() && installed == current
 }
 
@@ -85,7 +97,7 @@ pub(crate) fn lock_differences(lockfile: &Lockfile, package_json: &PackageJson) 
         .filter(|package| locked_entry(Some(lockfile), package).is_none())
         .map(|package| {
             let specifier = package.version.as_deref().unwrap_or_default();
-            let locked = locked_section(lockfile, package.is_dev)
+            let locked = locked_section(lockfile, package.section())
                 .and_then(|section| section.get(&package.name));
             match locked {
                 Some(locked) => format!(
@@ -97,14 +109,14 @@ pub(crate) fn lock_differences(lockfile: &Lockfile, package_json: &PackageJson) 
         })
         .collect();
 
-    for is_dev in [false, true] {
-        let Some(section) = locked_section(lockfile, is_dev) else {
+    for section in DependencySection::INSTALLED {
+        let Some(locked) = locked_section(lockfile, section) else {
             continue;
         };
-        let unlisted = section.keys().filter(|name| {
+        let unlisted = locked.keys().filter(|name| {
             !packages
                 .iter()
-                .any(|package| is_declared_as(package, name, is_dev))
+                .any(|package| is_declared_in(package, name, section))
         });
         differences.extend(unlisted.map(|name| format!("{name} (not in package.json)")));
     }
@@ -112,27 +124,28 @@ pub(crate) fn lock_differences(lockfile: &Lockfile, package_json: &PackageJson) 
     differences
 }
 
-fn is_declared_as(package: &InstallPackage, name: &str, is_dev: bool) -> bool {
-    package.is_dev == is_dev && package.name == name
+fn is_declared_in(package: &InstallPackage, name: &str, section: DependencySection) -> bool {
+    package.section() == section && package.name == name
 }
 
 fn locked_section(
     lockfile: &Lockfile,
-    is_dev: bool,
+    section: DependencySection,
 ) -> Option<&BTreeMap<String, LockedDependency>> {
     let root = lockfile.root()?;
-    Some(if is_dev {
-        &root.dev_dependencies
-    } else {
-        &root.dependencies
-    })
+    match section {
+        DependencySection::Dependencies => Some(&root.dependencies),
+        DependencySection::DevDependencies => Some(&root.dev_dependencies),
+        DependencySection::OptionalDependencies => Some(&root.optional_dependencies),
+        DependencySection::PeerDependencies => None,
+    }
 }
 
 fn locked_entry<'a>(
     lockfile: Option<&'a Lockfile>,
     package: &InstallPackage,
 ) -> Option<&'a LockedDependency> {
-    locked_section(lockfile?, package.is_dev)?
+    locked_section(lockfile?, package.section())?
         .get(&package.name)
         .filter(|locked| Some(&locked.specifier) == package.version.as_ref())
 }
