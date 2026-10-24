@@ -451,6 +451,42 @@ fn resolves_peer_dependencies_from_the_project() {
 }
 
 #[test]
+fn ignores_leftovers_of_an_interrupted_install() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+    let packages = project.craft_home().join("packages");
+    let partial_extraction = packages.join("ms-2.1.3/.extract-a1b2c3");
+    std::fs::create_dir_all(&partial_extraction).expect("create partial extraction");
+    std::fs::write(partial_extraction.join("package.json"), "{").expect("write partial file");
+    std::fs::write(packages.join(".tmpA1b2C3"), b"\x1f\x8b").expect("write partial download");
+
+    project.craft().arg("install").assert().success();
+
+    assert_eq!(project.required_version("ms"), Ok("2.1.3".to_string()));
+}
+
+#[test]
+fn reuses_extracted_packages_without_downloading_again() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    let first = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+    first.craft().arg("install").assert().success();
+    std::fs::remove_file(first.craft_home().join("packages/ms-2.1.3.tgz")).expect("remove tarball");
+    let second = first.sibling(json!({ "dependencies": { "ms": "^2.0.0" } }));
+
+    second.craft().arg("install").assert().success();
+
+    let tarball_requests = registry
+        .requested_paths()
+        .iter()
+        .filter(|path| path.ends_with(".tgz"))
+        .count();
+    assert_eq!(tarball_requests, 1);
+    assert_eq!(second.required_version("ms"), Ok("2.1.3".to_string()));
+}
+
+#[test]
 #[ignore = "fixed by 2.2: installs sharing a craft home race on the global cache"]
 fn concurrent_installs_sharing_a_craft_home_succeed() {
     let registry = MockRegistry::start();
