@@ -23,9 +23,7 @@ impl LinkerPipe {
     }
 
     fn package_dir(&self, artifact: &ResolvedArtifact) -> PathBuf {
-        self.context
-            .package_cache_dir()
-            .join(format!("{}-{}/package", artifact.name, artifact.version))
+        self.context.package_dir(&artifact.name, &artifact.version)
     }
 
     /// Links a package's dependencies into its own node_modules in the cache.
@@ -191,10 +189,9 @@ mod tests {
         );
 
         // Setup cache
-        let cache_dir = context.package_cache_dir();
         let pkg_name = "test-pkg";
         let pkg_version = "1.0.0";
-        let pkg_dir = cache_dir.join(format!("{}-{}/package", pkg_name, pkg_version));
+        let pkg_dir = context.package_dir(pkg_name, pkg_version);
         fs::create_dir_all(&pkg_dir).await?;
 
         // Create bin script
