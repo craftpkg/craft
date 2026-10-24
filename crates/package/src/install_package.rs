@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::dependency_spec::{is_location, split_name_and_spec};
 pub use crate::{NpmPackage, PackageJson};
 
@@ -34,6 +36,15 @@ impl InstallPackage {
 
         let (name, spec) = split_name_and_spec(literal);
         Self::new(name.to_string(), spec.map(str::to_string), is_dev)
+    }
+}
+
+impl Display for InstallPackage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.version {
+            Some(version) => write!(f, "{}@{}", self.name, version),
+            None => write!(f, "{}", self.name),
+        }
     }
 }
 
