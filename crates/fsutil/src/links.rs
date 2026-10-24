@@ -4,11 +4,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::fs;
 
+use crate::context::PathContext;
+
 static STAGING_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Removes whatever is at `path` without following it: a file, a directory tree, or a symlink,
 /// including one whose target no longer exists. Returns whether anything was there.
 pub async fn remove_entry(path: &Path) -> io::Result<bool> {
+    remove_entry_inner(path).await.at("remove", path)
+}
+
+pub(crate) async fn remove_entry_inner(path: &Path) -> io::Result<bool> {
     let metadata = match fs::symlink_metadata(path).await {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
@@ -29,6 +35,10 @@ pub async fn remove_entry(path: &Path) -> io::Result<bool> {
 /// Creates `path` and its parents as directories, replacing anything in the way that does not
 /// resolve to a directory, such as a dangling symlink or a file.
 pub async fn ensure_dir(path: &Path) -> io::Result<()> {
+    ensure_dir_inner(path).await.at("create directory", path)
+}
+
+async fn ensure_dir_inner(path: &Path) -> io::Result<()> {
     match fs::create_dir_all(path).await {
         Err(error) if is_blocked(&error) => {}
         other => return other,
@@ -41,20 +51,24 @@ pub async fn ensure_dir(path: &Path) -> io::Result<()> {
     }
 
     if let Some(parent) = path.parent() {
-        Box::pin(ensure_dir(parent)).await?;
+        Box::pin(ensure_dir_inner(parent)).await?;
     }
-    remove_entry(path).await?;
+    remove_entry_inner(path).await?;
     fs::create_dir_all(path).await
 }
 
 /// Points `link` at the directory `target`, replacing whatever `link` was.
 pub async fn force_symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
-    force_symlink(target, link, LinkKind::Dir).await
+    force_symlink(target, link, LinkKind::Dir)
+        .await
+        .at("link", link)
 }
 
 /// Points `link` at the file `target`, replacing whatever `link` was.
 pub async fn force_symlink_file(target: &Path, link: &Path) -> io::Result<()> {
-    force_symlink(target, link, LinkKind::File).await
+    force_symlink(target, link, LinkKind::File)
+        .await
+        .at("link", link)
 }
 
 /// `target` expressed relative to the directory holding `link`, so the link survives moving the
@@ -109,7 +123,7 @@ enum LinkKind {
 /// writers and stale or dangling entries never surface as `EEXIST`.
 async fn force_symlink(target: &Path, link: &Path, kind: LinkKind) -> io::Result<()> {
     if let Some(parent) = link.parent() {
-        ensure_dir(parent).await?;
+        ensure_dir_inner(parent).await?;
     }
     let staging = staging_path(link);
     create_symlink(target, &staging, kind).await?;
@@ -117,7 +131,7 @@ async fn force_symlink(target: &Path, link: &Path, kind: LinkKind) -> io::Result
     let renamed = match fs::rename(&staging, link).await {
         Ok(()) => Ok(()),
         Err(_) => {
-            remove_entry(link).await?;
+            remove_entry_inner(link).await?;
             fs::rename(&staging, link).await
         }
     };
