@@ -3,91 +3,88 @@ use actor::{
     RemoveActorPayload, RemovePackageActor, RunScriptActor, RunScriptActorPayload,
 };
 use cli::{CacheCommands, Commands};
-use contract::Actor;
+use contract::{Actor, Context};
 
-pub struct CraftManager;
+pub struct CraftManager {
+    context: Context,
+}
 
 impl CraftManager {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn set_verbose(&self, verbose: bool) {
-        if verbose {
-            // SAFETY: We're setting a simple environment variable for this process only
-            // This is safe as we control the key and value, and it doesn't affect other threads
-            unsafe {
-                std::env::set_var(contract::CRAFT_VERBOSE, "1");
-            }
-        }
+    pub fn new(context: Context) -> Self {
+        Self { context }
     }
 
     pub async fn handle_command(&self, command: Commands) -> contract::Result<()> {
+        let context = self.context.clone();
+
         match command {
             Commands::Add { packages, dev } => {
-                AddPackageActor::with(AddActorPayload {
-                    packages,
-                    is_dev: dev,
-                })
+                AddPackageActor::with(
+                    context,
+                    AddActorPayload {
+                        packages,
+                        is_dev: dev,
+                    },
+                )
                 .run()
                 .await
             }
             Commands::Remove { packages } => {
-                RemovePackageActor::with(RemoveActorPayload {
-                    packages,
-                    working_dir: None,
-                })
-                .run()
-                .await
+                RemovePackageActor::with(context, RemoveActorPayload { packages })
+                    .run()
+                    .await
             }
             Commands::Run { script, args } => {
-                RunScriptActor::with(RunScriptActorPayload { script, args })
+                RunScriptActor::with(context, RunScriptActorPayload { script, args })
                     .run()
                     .await
             }
             Commands::Cache { command } => match command {
                 CacheCommands::Clean { force } => {
-                    CleanCacheActor::with(CleanCacheActorPayload { force })
+                    CleanCacheActor::with(context, CleanCacheActorPayload { force })
                         .run()
                         .await
                 }
             },
             Commands::Start => {
-                RunScriptActor::with(RunScriptActorPayload {
-                    script: "start".to_string(),
-                    args: vec![],
-                })
+                RunScriptActor::with(
+                    context,
+                    RunScriptActorPayload {
+                        script: "start".to_string(),
+                        args: vec![],
+                    },
+                )
                 .run()
                 .await
             }
             Commands::Test => {
-                RunScriptActor::with(RunScriptActorPayload {
-                    script: "test".to_string(),
-                    args: vec![],
-                })
+                RunScriptActor::with(
+                    context,
+                    RunScriptActorPayload {
+                        script: "test".to_string(),
+                        args: vec![],
+                    },
+                )
                 .run()
                 .await
             }
-            Commands::Install => InstallActor::with(()).run().await,
+            Commands::Install => InstallActor::with(context, ()).run().await,
             Commands::External(args) => {
                 if let Some(script) = args.first() {
-                    RunScriptActor::with(RunScriptActorPayload {
-                        script: script.clone(),
-                        args: args[1..].to_vec(),
-                    })
+                    RunScriptActor::with(
+                        context,
+                        RunScriptActorPayload {
+                            script: script.clone(),
+                            args: args[1..].to_vec(),
+                        },
+                    )
                     .run()
                     .await
                 } else {
-                    InstallActor::with(()).run().await
+                    InstallActor::with(context, ()).run().await
                 }
             }
         }
-    }
-}
-
-impl Default for CraftManager {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -98,14 +95,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_start_command() {
-        let manager = CraftManager::new();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let manager = CraftManager::new(Context::new(
+            temp_dir.path().to_path_buf(),
+            temp_dir.path().join(".craft"),
+            false,
+        ));
         // Just verifying it doesn't panic for now, as we are printing to stdout
         let _ = manager.handle_command(Commands::Start).await;
     }
 
     #[tokio::test]
     async fn test_handle_add_command() {
-        let manager = CraftManager::new();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let manager = CraftManager::new(Context::new(
+            temp_dir.path().to_path_buf(),
+            temp_dir.path().join(".craft"),
+            false,
+        ));
         let _ = manager
             .handle_command(Commands::Add {
                 packages: vec!["react".to_string()],
