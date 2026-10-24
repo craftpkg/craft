@@ -2,7 +2,7 @@ use predicates::str::contains;
 use serde_json::json;
 use testkit::{MockRegistry, PackageFixture};
 
-use crate::common::Project;
+use crate::common::{Project, block_on};
 
 #[test]
 fn installs_dependencies_and_their_subtree() {
@@ -441,10 +441,20 @@ fn replaces_a_dangling_bin_directory() {
 
     let bin = project.path().join("node_modules/.bin/cowsay");
     assert_eq!(
+        block_on(fsutil::bin_target(&bin)),
+        Some(project.path().join("node_modules/cowsay/cli.js"))
+    );
+    #[cfg(unix)]
+    assert_eq!(
         std::fs::read_link(&bin).expect("cowsay bin is a link"),
         std::path::PathBuf::from("../cowsay/cli.js")
     );
-    assert!(bin.exists());
+    project
+        .craft()
+        .arg("cowsay")
+        .assert()
+        .success()
+        .stdout(contains("cowsay cowsay@1.6.0"));
 }
 
 #[test]
@@ -474,7 +484,7 @@ fn links_every_file_under_directories_bin() {
             .manifest_field("directories", json!({ "bin": "./scripts" }))
             .file(
                 "scripts/hello",
-                "#!/bin/sh\necho hello from directories.bin\n",
+                "#!/usr/bin/env node\nconsole.log('hello from directories.bin');\n",
             ),
     );
     let project = Project::new(
