@@ -1,4 +1,4 @@
-use contract::Actor;
+use contract::{Actor, Context};
 
 #[derive(Debug, Clone)]
 pub struct CleanCacheActorPayload {
@@ -6,12 +6,13 @@ pub struct CleanCacheActorPayload {
 }
 
 pub struct CleanCacheActor {
+    context: Context,
     payload: CleanCacheActorPayload,
 }
 
 impl Actor<CleanCacheActorPayload> for CleanCacheActor {
-    fn with(payload: CleanCacheActorPayload) -> Self {
-        Self { payload }
+    fn with(context: Context, payload: CleanCacheActorPayload) -> Self {
+        Self { context, payload }
     }
 
     async fn run(&self) -> contract::Result<()> {
@@ -21,7 +22,7 @@ impl Actor<CleanCacheActorPayload> for CleanCacheActor {
             return Ok(());
         }
 
-        let cache_dir = contract::get_package_cache_dir();
+        let cache_dir = self.context.package_cache_dir();
 
         if !cache_dir.exists() {
             debug::info!("Cache directory does not exist: {:?}", cache_dir);
@@ -46,7 +47,8 @@ mod tests {
     fn test_clean_cache_actor_without_force() {
         let payload = CleanCacheActorPayload { force: false };
 
-        let actor = CleanCacheActor::with(payload);
+        let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false);
+        let actor = CleanCacheActor::with(context, payload);
         assert!(!actor.payload.force);
     }
 }
