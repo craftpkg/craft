@@ -45,7 +45,14 @@ pub enum Commands {
     },
     Start,
     Test,
-    Install,
+    Install {
+        /// Install exactly what craft.lock records; fail if it is missing or out of date.
+        /// On by default when the CI environment variable is set.
+        #[arg(long)]
+        frozen_lockfile: bool,
+    },
+    /// Remove node_modules and install exactly what craft.lock records.
+    Ci,
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -83,7 +90,10 @@ pub enum Action {
     Cache {
         command: CacheCommands,
     },
-    Install,
+    Install {
+        frozen_lockfile: bool,
+    },
+    Ci,
 }
 
 impl Cli {
@@ -93,7 +103,9 @@ impl Cli {
 
     pub fn normalize(&self) -> Action {
         let Some(command) = &self.command else {
-            return Action::Install;
+            return Action::Install {
+                frozen_lockfile: false,
+            };
         };
 
         match command {
@@ -118,10 +130,15 @@ impl Cli {
             },
             Commands::Start => run_script("start", &[]),
             Commands::Test => run_script("test", &[]),
-            Commands::Install => Action::Install,
+            Commands::Install { frozen_lockfile } => Action::Install {
+                frozen_lockfile: *frozen_lockfile,
+            },
+            Commands::Ci => Action::Ci,
             Commands::External(args) => match args.split_first() {
                 Some((script, args)) => run_script(script, args),
-                None => Action::Install,
+                None => Action::Install {
+                    frozen_lockfile: false,
+                },
             },
         }
     }
@@ -219,7 +236,12 @@ mod tests {
         // craft with no args should default to install
         let cli = Cli::parse_from(["craft"]);
         let normalized = cli.normalize();
-        assert_eq!(normalized, Action::Install);
+        assert_eq!(
+            normalized,
+            Action::Install {
+                frozen_lockfile: false
+            }
+        );
     }
 
     #[test]
@@ -283,12 +305,29 @@ mod tests {
     }
 
     #[test]
+    fn test_install_frozen_lockfile_and_ci() {
+        let frozen = Cli::parse_from(["craft", "install", "--frozen-lockfile"]);
+        assert_eq!(
+            frozen.normalize(),
+            Action::Install {
+                frozen_lockfile: true
+            }
+        );
+        assert_eq!(Cli::parse_from(["craft", "ci"]).normalize(), Action::Ci);
+    }
+
+    #[test]
     fn test_default_command() {
         let cli = Cli::parse_from(["craft"]);
         assert_eq!(cli.command, None);
 
         // Verify normalization
         let normalized = cli.normalize();
-        assert_eq!(normalized, Action::Install);
+        assert_eq!(
+            normalized,
+            Action::Install {
+                frozen_lockfile: false
+            }
+        );
     }
 }
