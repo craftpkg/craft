@@ -66,6 +66,25 @@ fn saves_a_dependency_added_with_a_version_spec() {
 }
 
 #[test]
+fn adds_a_package_under_an_alias() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("string-width", "4.2.3"));
+    let project = Project::new(&registry, json!({ "name": "app" }));
+
+    project
+        .craft()
+        .args(["add", "sw@npm:string-width@^4.2.0"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        project.package_json()["dependencies"]["sw"],
+        "npm:string-width@^4.2.3"
+    );
+    assert_eq!(project.required_version("sw"), Ok("4.2.3".to_string()));
+}
+
+#[test]
 fn adds_a_package_by_dist_tag() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("ms", "2.1.3"));
