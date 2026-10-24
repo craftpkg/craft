@@ -41,5 +41,13 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
 
+    - name: Install Node.js for real-world tests
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
     - name: Run tests that need registry.npmjs.org
       run: cargo test -p resolver -- --ignored
+
+    - name: Run real-world scenarios
+      run: make real-world
