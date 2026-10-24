@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use cli::Cli;
-use contract::{Context, Result, ScriptError};
+use contract::{Context, NetworkMode, Result, ScriptError};
 use manager::CraftManager;
 
 #[tokio::main]
@@ -22,7 +22,12 @@ async fn run() -> Result<()> {
 
     debug::trace!("CLI: {:?}", &cli);
 
-    let context = Context::from_env(cli.verbose)?;
+    let mut context = Context::from_env(cli.verbose)?;
+    if cli.offline {
+        context.registry.network_mode = NetworkMode::Offline;
+    } else if cli.prefer_offline {
+        context.registry.network_mode = NetworkMode::PreferOffline;
+    }
     let manager = CraftManager::new(context);
 
     manager.handle_command(action).await
