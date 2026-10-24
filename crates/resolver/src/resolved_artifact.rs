@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use contract::Context;
 use network::Integrity;
-use package::PackageJson;
+use package::{PackageJson, PlatformConstraints};
 use sha2::{Digest, Sha256};
 
 use crate::NodeId;
@@ -18,6 +18,8 @@ pub struct ResolvedArtifact {
     pub source: ArtifactSource,
     pub integrity: Option<Integrity>,
     pub package: Option<PackageJson>,
+    /// The `os` / `cpu` / `libc` the package is limited to.
+    pub platform: PlatformConstraints,
 }
 
 /// Where a package's files come from.
@@ -138,6 +140,7 @@ mod tests {
             version: "0.1.0".to_string(),
             source,
             integrity: None,
+            platform: Default::default(),
             package: None,
         }
     }
@@ -199,6 +202,7 @@ mod tests {
             },
             integrity: Some(Integrity::sha512_of(b"node")),
             package: None,
+            platform: PlatformConstraints::default(),
         };
         let entry = registry.package_dir(&context);
         let entry_name = entry.file_name().unwrap().to_string_lossy();
