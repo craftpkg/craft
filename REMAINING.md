@@ -42,7 +42,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 1.2 | `InstallPipe` returns a resolution graph, not a flat list | P0 | [x] |
 | 1.3 | npm alias linking (root + transitive) | P0 | [x] |
 | 1.4 | Tarball root-directory stripping | P0 | [x] |
-| 1.5 | HTTP status checks + friendly registry errors | P0 | [ ] |
+| 1.5 | HTTP status checks + friendly registry errors | P0 | [x] |
 | 1.6 | Atomic download and extraction | P0 | [ ] |
 | 1.7 | Integrity verification (`dist.integrity` / `shasum`) | P0 | [ ] |
 | 1.8 | Symlink-safe filesystem helpers (dangling links) | P0 | [ ] |
@@ -264,7 +264,9 @@ Also normalize permissions (some tarballs have `0o000` dirs) — files `0o644`, 
 
 **Done when** the `@types`-style fixture links to a dir containing `index.d.ts`.
 
-### 1.5 HTTP status checks + friendly registry errors · P0 ✅
+### 1.5 HTTP status checks + friendly registry errors · P0 ✅ — ✔ done
+
+> Done: `Network::fetch` / `download` turn non-2xx responses into `NetworkError::Status { url, status }` before reading the body, so error pages are never parsed or written to the cache. `NpmResolver` maps 404 → `RegistryError::PackageNotFound`, 401/403 → `RegistryError::AccessDenied` (credentials hint); anything else keeps its cause under "failed to fetch {name} from {registry}". `InstallPipe` threads the resolved ancestry through recursion and wraps resolve/fetch failures once, at the failing request: `failed to install ghost@^1.0.0 (required by express@4.21.2 > body-parser@1.20.3)`. Retrying 429/5xx is left to 5.4.
 
 **Problem**
 - `Network::fetch` and `Network::download` (`crates/network/src/network.rs:21-37`) never check `response.status()`. A 404/500 body is saved as a `.tgz`, or parsed as a packument.
