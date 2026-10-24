@@ -7,6 +7,7 @@ use package::PackageJson;
 use tarball::gzip::unzip;
 
 use crate::git::{GitSpec, checkout, resolve_commit};
+use crate::locked::LockPreferences;
 use crate::resolved_artifact::{git_package_dir, short_hash};
 use crate::{ArtifactSource, ResolvedArtifact};
 
@@ -110,9 +111,14 @@ pub(crate) async fn resolve_git(
     network: &Network,
     requested_name: Option<&str>,
     spec: &str,
+    locked: Option<&LockPreferences>,
 ) -> Result<ResolvedArtifact> {
     let git_spec = GitSpec::parse(spec).ok_or_else(|| anyhow!("invalid git dependency: {spec}"))?;
-    let sha = resolve_commit(&git_spec).await?;
+    let locked_commit = locked.and_then(|locked| locked.git_commit(&git_spec.clone_url));
+    let sha = match locked_commit {
+        Some(commit) => commit.to_string(),
+        None => resolve_commit(&git_spec).await?,
+    };
     let package_dir = git_package_dir(context, &git_spec.clone_url, &sha);
 
     if !package_dir.exists() {
