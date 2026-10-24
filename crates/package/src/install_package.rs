@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::path::PathBuf;
 
+use crate::DependencySection;
 use crate::dependency_spec::{is_location, split_name_and_spec};
 pub use crate::{NpmPackage, PackageJson};
 
@@ -12,6 +13,8 @@ pub struct InstallPackage {
     /// The directory relative `file:` and `link:` specs resolve against; the project directory
     /// when `None`.
     pub base_dir: Option<PathBuf>,
+    /// From the project's `optionalDependencies`: skipped instead of failing the install.
+    pub is_optional: bool,
     /// Whether a version from craft.lock may answer this request. Off for packages the user
     /// just asked for and for project dependencies whose specifier changed.
     pub prefer_locked: bool,
@@ -24,7 +27,24 @@ impl InstallPackage {
             version,
             is_dev,
             base_dir: None,
+            is_optional: false,
             prefer_locked: true,
+        }
+    }
+
+    pub fn optional(mut self) -> Self {
+        self.is_optional = true;
+        self
+    }
+
+    /// The package.json section a project dependency is declared in.
+    pub fn section(&self) -> DependencySection {
+        if self.is_optional {
+            DependencySection::OptionalDependencies
+        } else if self.is_dev {
+            DependencySection::DevDependencies
+        } else {
+            DependencySection::Dependencies
         }
     }
 
