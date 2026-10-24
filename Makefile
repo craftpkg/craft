@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt craft real-world
+.PHONY: build test lint fmt craft real-world docs
 
 all: build test lint
 
@@ -17,6 +17,10 @@ fmt:
 
 real-world:
 	cargo test -p craft --test real_world -- --ignored
+
+docs:
+	cargo build -q --release -p craft
+	cd docs && ../target/release/craft install && ../target/release/craft run docs:dev
 
 craft:
 	cargo run -p craft -- $(filter-out $@,$(MAKECMDGOALS))
