@@ -51,7 +51,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 1.11 | `craft remove` fixes | P1 | [x] |
 | 1.12 | `craft run` fixes (PATH, exit code, quoting, pre/post, env) | P1 | [x] |
 | 1.13 | Git / tarball-URL / `file:` / `link:` dependencies | P1 | [x] |
-| 1.14 | Bin linking edge cases | P1 | [ ] |
+| 1.14 | Bin linking edge cases | P1 | [x] |
 | **Phase 2 — Store & layout redesign** | | | |
 | 2.1 | Global content-addressed store (read-only) | P0 | [ ] |
 | 2.2 | Per-project virtual store `node_modules/.craft` | P0 | [ ] |
@@ -416,7 +416,9 @@ Use relative symlink targets where possible (relocatable `node_modules`). Use it
 
 Can be split: tarball URL + `file:` + `link:` first (simple), git hosts second.
 
-### 1.14 Bin linking edge cases · P1 📖
+### 1.14 Bin linking edge cases · P1 📖 — ✔ done
+
+> Done: `pipes::bins::package_bins` normalizes bins like `npm-normalize-package-bin`: names become their last path segment (`@scope/tool` → `tool`, `../../x` → `x`), targets are clamped inside the package, and without `bin` every file under `directories.bin` becomes a bin. The linker links packages in parallel, then bins sequentially in dependency-name order; a later package declaring a taken bin is skipped with `warning: bin <name> of <pkg> conflicts with <owner>`, so the winner is stable across installs. Targets are relative (since 1.8) and get `+x` added without clobbering other mode bits.
 
 **Problems** (`linker_pipe.rs:203-266`)
 - String `bin` on a scoped package uses `@scope/name` as the bin name → tries to create `.bin/@scope/name` (ENOENT). Correct name is the part after `/`.
