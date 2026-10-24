@@ -89,6 +89,18 @@ impl InstallPipe {
             return Ok(node_id);
         }
 
+        let is_supported = artifact.platform.supports(&self.context.platform);
+        if !is_supported {
+            debug::info!("Not fetching {node_id}: not for {}", self.context.platform);
+            let node = ResolvedNode {
+                artifact,
+                dependencies: Vec::new(),
+                peers: Vec::new(),
+            };
+            self.nodes.lock().await.insert(node_id.clone(), node);
+            return Ok(node_id);
+        }
+
         let artifact = self
             .fetch(artifact)
             .await
@@ -196,37 +208,57 @@ impl InstallPipe {
         if is_link {
             return Ok(Vec::new());
         }
-        let Some(dependencies) = artifact
-            .package
-            .as_ref()
-            .and_then(|package| package.dependencies.clone())
-        else {
+        let Some(manifest) = &artifact.package else {
             return Ok(Vec::new());
         };
+        let mut declared: BTreeMap<String, (String, DependencyKind)> = manifest
+            .dependencies
+            .iter()
+            .flatten()
+            .map(|(name, spec)| (name.clone(), (spec.clone(), DependencyKind::Production)))
+            .collect();
+        for (name, spec) in manifest.optional_dependencies() {
+            declared.insert(name, (spec, DependencyKind::Optional));
+        }
         let base_dir = &dependency_base_dir(artifact, &self.context);
         debug::info!(
             "Resolving dependencies for {}: {:?}",
             artifact.name,
-            dependencies
+            declared
         );
 
-        let results: Vec<Result<Edge>> = stream::iter(dependencies)
-            .map(|(name, spec)| async move {
+        let results: Vec<Result<Option<Edge>>> = stream::iter(declared)
+            .map(|(name, (spec, kind))| async move {
                 let package = InstallPackage::new(name.clone(), Some(spec.clone()), false)
                     .with_base_dir(base_dir.clone());
-                let target = self.resolve_package(&package, ancestry).await?;
-                Ok(Edge {
+                let target = match self.resolve_package(&package, ancestry).await {
+                    Ok(target) => target,
+                    Err(error) if kind == DependencyKind::Optional => {
+                        eprintln!(
+                            "warning: skipping optional dependency {package} of {}: {error:#}",
+                            artifact.name
+                        );
+                        return Ok(None);
+                    }
+                    Err(error) => return Err(error),
+                };
+                Ok(Some(Edge {
                     name,
                     spec: Some(spec),
                     target,
-                    kind: DependencyKind::Production,
-                })
+                    kind,
+                }))
             })
             .buffer_unordered(DEPENDENCY_CONCURRENCY)
             .collect()
             .await;
 
-        let mut edges = results.into_iter().collect::<Result<Vec<_>>>()?;
+        let mut edges: Vec<Edge> = results
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect();
         edges.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(edges)
     }
