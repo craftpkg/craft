@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 use testkit::{MockRegistry, PackageFixture};
 
-use crate::common::Project;
+use crate::common::{Project, block_on};
 
 #[test]
 fn lays_packages_out_in_the_virtual_store() {
@@ -17,11 +17,17 @@ fn lays_packages_out_in_the_virtual_store() {
 
     let node_modules = project.path().join("node_modules");
     assert_eq!(
-        read_link(&node_modules.join("debug")),
-        PathBuf::from(".craft/debug@4.4.0/node_modules/debug")
+        link_target(&node_modules.join("debug")),
+        node_modules.join(".craft/debug@4.4.0/node_modules/debug")
     );
     assert_eq!(
-        read_link(&node_modules.join(".craft/debug@4.4.0/node_modules/ms")),
+        link_target(&node_modules.join(".craft/debug@4.4.0/node_modules/ms")),
+        node_modules.join(".craft/ms@2.1.3/node_modules/ms")
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        std::fs::read_link(node_modules.join(".craft/debug@4.4.0/node_modules/ms"))
+            .expect("ms is a link"),
         PathBuf::from("../../ms@2.1.3/node_modules/ms")
     );
     assert!(
@@ -121,6 +127,7 @@ fn links_dependency_bins_inside_each_virtual_store_entry() {
     assert!(std::fs::symlink_metadata(node_modules.join(".bin/cowsay")).is_err());
 }
 
-fn read_link(path: &Path) -> PathBuf {
-    std::fs::read_link(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+fn link_target(path: &Path) -> PathBuf {
+    block_on(fsutil::read_link_resolved(path))
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
