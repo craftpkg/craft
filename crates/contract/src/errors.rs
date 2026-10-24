@@ -22,6 +22,9 @@ pub enum PipelineError {
 pub enum NetworkError {
     #[error("GET {url} returned HTTP {status}")]
     Status { url: String, status: u16 },
+
+    #[error("{url} is not cached and craft is offline")]
+    Offline { url: String },
 }
 
 #[derive(Error, Debug)]
