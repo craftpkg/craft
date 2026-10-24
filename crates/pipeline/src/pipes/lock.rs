@@ -22,7 +22,8 @@ pub fn lockfile_from_graph(
             .unwrap_or_default();
         let section = match root.kind {
             DependencyKind::Development => &mut importer.dev_dependencies,
-            _ => &mut importer.dependencies,
+            DependencyKind::Optional => &mut importer.optional_dependencies,
+            DependencyKind::Production | DependencyKind::Peer => &mut importer.dependencies,
         };
         section.insert(
             root.name.clone(),
