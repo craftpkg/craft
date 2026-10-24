@@ -46,7 +46,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 1.6 | Atomic download and extraction | P0 | [x] |
 | 1.7 | Integrity verification (`dist.integrity` / `shasum`) | P0 | [x] |
 | 1.8 | Symlink-safe filesystem helpers (dangling links) | P0 | [x] |
-| 1.9 | `craft add` fixes | P1 | [ ] |
+| 1.9 | `craft add` fixes | P1 | [x] |
 | 1.10 | Preserve `package.json` formatting and key order | P1 | [ ] |
 | 1.11 | `craft remove` fixes | P1 | [ ] |
 | 1.12 | `craft run` fixes (PATH, exit code, quoting, pre/post, env) | P1 | [ ] |
@@ -333,14 +333,14 @@ async fn force_symlink_dir(target: &Path, link: &Path) -> io::Result<()>  // rem
 
 Use relative symlink targets where possible (relocatable `node_modules`). Use it everywhere links are created or removed.
 
-### 1.9 `craft add` fixes · P1 ✅
+### 1.9 `craft add` fixes · P1 ✅ — ✔ done
 
-> Partly done in 1.1: `craft add` saves the version each requested package resolved to (from `Installation.roots`), so `craft add react@18` saves `^18.3.1` and aliases save `npm:<target>@^<version>`; the arbitrary-`find` bug is gone.
+> Done: `craft add` reads `package.json` before resolving anything, so a missing one fails with no registry traffic. Saved specs follow npm: `^<resolved>` for tags, ranges and exact versions, the exact version with the new `-E/--exact`, and `npm:<target>@…` for aliases (from the graph's root edges since 1.2). Adding with or without `-D` moves an existing entry out of the other section. Left for later: suggesting `craft init` (6.3), saving git/file specs verbatim (1.13), and installing all dependencies so the lockfile stays consistent (Phase 3).
 
 **Problems** (`crates/actor/src/add_package_actor.rs`)
 - ~~`craft add react@18` installs but does not update `package.json`~~ (fixed in 1.1).
 - ~~When several versions of a name are resolved, `find` picks an arbitrary one~~ (fixed in 1.1).
-- `package.json` is read **after** installing (line 37); with no `package.json`, all work is done then it fails.
+- ~~`package.json` is read **after** installing (line 37); with no `package.json`, all work is done then it fails.~~
 - Only the added packages are installed/linked — existing deps aren't verified, and once the lockfile exists it must be updated too.
 
 **Fix**
