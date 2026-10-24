@@ -86,7 +86,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 6.1 | Progress output and install summary | P2 | [x] |
 | 6.2 | Error reporting (no panics, contextual messages) | P2 | [x] |
 | 6.3 | Missing commands and flags | P2 | [x] |
-| 6.4 | Windows support (shims, junctions) | P2 | [ ] |
+| 6.4 | Windows support (shims, junctions) | P2 | [x] |
 | 6.5 | Release & docs accuracy | P2 | [x] |
 | **Phase 7 — Later** | | | |
 | 7.x | Workspaces, `package-lock.json` import, overrides, `dlx`, global installs | — | [ ] |
@@ -719,7 +719,11 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 - Flags: `add -E/--exact`, `-O/--save-optional`, `-P/--save-peer`; `install --production`/`--omit=dev`, `--ignore-scripts`, `--frozen-lockfile`, `--offline`.
 - `craft run` with no script: list scripts.
 
-### 6.4 Windows support · P2
+### 6.4 Windows support · P2 — ✔ done
+
+> Done: bins are `cmd-shim` style `.cmd` / `.ps1` / sh shims (`fsutil::shims`) that run the bin's shebang program, preferring one beside the shim, and pass the exit code through without cmd's "Terminate batch job" prompt; `fsutil::bins` (`link_bin`, `bin_target`, `remove_bin`, `bin_names`, `bin_command`) hides symlink vs shim from the linker, prune, `craft remove`, bin lookup and dlx. Directory links are junctions (absolute targets, no privileges needed); `read_link_resolved` strips the `\\?\` prefix so prune can compare paths, and replacing a link removes the old entry and confirms the move, since Windows can't rename onto a directory. `file:` copies turn linked directories into junctions and fall back to copying linked files. Scripts run as `cmd /d /s /c "<script>"` passed verbatim (`raw_arg`); appended arguments use npm's quoting (MSVC rules plus `^` before cmd metacharacters, twice when the script's first word resolves to a `.cmd`/`.bat` on `PATH`). The lockfile writes local paths and keys with `/`, so it is identical on every platform. e2e fixtures no longer depend on `sh` (`node -e` / `print.js` helpers), and link assertions go through `fsutil`. CI runs `windows-latest`; `docker/windows/test.sh` cross-compiles every test executable with mingw and runs it under Wine (staging, for junctions) with Windows Node.js and Git.
+>
+> Verified under Wine: all unit tests, and 177 of 178 e2e tests (each failure of a parallel run passes alone); the eight-process concurrent-install test, and installs of real packages from the npm registry, are killed by a Rosetta bug (`xsave_header.xfeatures == kSupportedXFeatureBits` in `rt_sigreturn`) when Docker on Apple Silicon emulates x86 with Rosetta instead of QEMU — no Windows exception is raised before it. Real Windows is verified by CI's `windows-latest` job.
 
 - Bins: generate `.cmd` + `.ps1` + sh shims (like `cmd-shim`) instead of `symlink_file` (`linker_pipe.rs:259`).
 - Directory links: junctions (no admin/Developer Mode needed) instead of `symlink_dir` (`linker_pipe.rs:90`, `191`).
