@@ -100,6 +100,16 @@ pub enum LockfileError {
 }
 
 #[derive(Error, Debug)]
+pub enum PlatformError {
+    #[error("{package} does not support {platform}, but {dependent} requires it")]
+    Unsupported {
+        package: String,
+        platform: String,
+        dependent: String,
+    },
+}
+
+#[derive(Error, Debug)]
 pub enum PackageError {
     #[error("no package.json found")]
     NoPackageJson,
