@@ -3,7 +3,7 @@ use predicates::str::contains;
 use serde_json::json;
 use testkit::{MockRegistry, PackageFixture};
 
-use crate::common::Project;
+use crate::common::{Project, print_script};
 
 #[test]
 fn runs_a_script_from_package_json() {
@@ -92,8 +92,13 @@ fn passes_arguments_only_to_the_main_script() {
     let registry = MockRegistry::start();
     let project = Project::new(
         &registry,
-        json!({ "scripts": { "pretest": "echo pre", "test": "echo test", "posttest": "echo post" } }),
-    );
+        json!({ "scripts": {
+            "pretest": "node print.js pre",
+            "test": "node print.js test",
+            "posttest": "node print.js post",
+        } }),
+    )
+    .with_print_script();
 
     project
         .craft()
@@ -145,7 +150,7 @@ fn sets_npm_environment_variables() {
         json!({
             "name": "app",
             "version": "1.2.3",
-            "scripts": { "env": "echo $npm_lifecycle_event $npm_package_name $npm_package_version $npm_config_user_agent" },
+            "scripts": { "env": "node -e \"const e = process.env; console.log(e.npm_lifecycle_event, e.npm_package_name, e.npm_package_version, e.npm_config_user_agent)\"" },
         }),
     );
 
@@ -197,7 +202,11 @@ fn runs_pre_and_post_scripts_in_order() {
     let registry = MockRegistry::start();
     let project = Project::new(
         &registry,
-        json!({ "scripts": { "prebuild": "echo pre", "build": "echo build", "postbuild": "echo post" } }),
+        json!({ "scripts": {
+            "prebuild": print_script("pre"),
+            "build": print_script("build"),
+            "postbuild": print_script("post"),
+        } }),
     );
 
     project
@@ -211,7 +220,8 @@ fn runs_pre_and_post_scripts_in_order() {
 #[test]
 fn passes_arguments_verbatim() {
     let registry = MockRegistry::start();
-    let project = Project::new(&registry, json!({ "scripts": { "show": "echo" } }));
+    let project = Project::new(&registry, json!({ "scripts": { "show": "node print.js" } }))
+        .with_print_script();
 
     project
         .craft()
@@ -219,6 +229,58 @@ fn passes_arguments_verbatim() {
         .assert()
         .success()
         .stdout("a; echo INJECTED\n");
+}
+
+#[test]
+fn passes_shell_metacharacters_through_scripts_and_bins_unchanged() {
+    let registry = MockRegistry::start();
+    registry.publish(
+        PackageFixture::new("argv-json", "1.0.0")
+            .file(
+                "cli.js",
+                "#!/usr/bin/env node\nconsole.log(JSON.stringify(process.argv.slice(2)));\n",
+            )
+            .manifest_field("bin", json!({ "argv-json": "cli.js" })),
+    );
+    let project = Project::new(
+        &registry,
+        json!({
+            "dependencies": { "argv-json": "1.0.0" },
+            "scripts": {
+                "direct": "node -e \"console.log(JSON.stringify(process.argv.slice(1)))\" --",
+                "via-bin": "argv-json",
+            },
+        }),
+    );
+    project.craft().arg("install").assert().success();
+    let args = [
+        "a; echo INJECTED",
+        "a&b|c",
+        "100%",
+        "say \"hi\"",
+        r"C:\dir\",
+        "(x) <y>",
+        "^caret!",
+        "",
+    ];
+    let expected = format!("{}\n", json!(args));
+
+    for script in ["direct", "via-bin"] {
+        project
+            .craft()
+            .args(["run", script])
+            .args(args)
+            .assert()
+            .success()
+            .stdout(expected.clone());
+    }
+    project
+        .craft()
+        .args(["exec", "argv-json"])
+        .args(args)
+        .assert()
+        .success()
+        .stdout(expected);
 }
 
 #[test]
