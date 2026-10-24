@@ -155,21 +155,9 @@ mod tests {
             false,
         );
 
-        // Setup cache
         let pkg_name = "test-pkg";
         let pkg_version = "1.0.0";
-        let pkg_dir = context.package_dir(pkg_name, pkg_version);
-        fs::create_dir_all(&pkg_dir).await?;
 
-        // Create bin script
-        let bin_script_path = pkg_dir.join("cli.js");
-        {
-            let mut file = File::create(&bin_script_path)?;
-            writeln!(file, "#!/usr/bin/env node")?;
-            writeln!(file, "console.log('hello');")?;
-        }
-
-        // Create artifact
         let pkg_json = package::PackageJson {
             name: Some(pkg_name.to_string()),
             version: Some(pkg_version.to_string()),
@@ -190,6 +178,14 @@ mod tests {
             integrity: None,
             package: Some(pkg_json),
         };
+
+        let pkg_dir = artifact.package_dir(&context);
+        fs::create_dir_all(&pkg_dir).await?;
+        {
+            let mut file = File::create(pkg_dir.join("cli.js"))?;
+            writeln!(file, "#!/usr/bin/env node")?;
+            writeln!(file, "console.log('hello');")?;
+        }
 
         let node_id = NodeId::new(pkg_name, pkg_version);
         let graph = ResolutionGraph {
