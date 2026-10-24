@@ -95,6 +95,29 @@ impl Process {
     }
 }
 
+impl Process {
+    /// Runs to completion with stdout and stderr captured together, for output that is only
+    /// shown when something goes wrong.
+    pub async fn run_captured(self) -> Result<(i32, String)> {
+        let mut command = Command::new(&self.command);
+        command.args(&self.args).stdin(Stdio::null());
+        if let Some(cwd) = &self.cwd {
+            command.current_dir(cwd);
+        }
+        for (key, value) in &self.envs {
+            command.env(key, value);
+        }
+
+        let output = command
+            .output()
+            .await
+            .with_context(|| format!("failed to start {}", Path::new(&self.command).display()))?;
+        let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+        Ok((exit_code(output.status), combined))
+    }
+}
+
 #[cfg(unix)]
 fn exit_code(status: ExitStatus) -> i32 {
     use std::os::unix::process::ExitStatusExt;
@@ -141,6 +164,17 @@ mod tests {
             .unwrap();
 
         assert_eq!(code, 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_run_captured_collects_both_streams() {
+        let (code, output) = Process::shell("echo out; echo err >&2; exit 2")
+            .run_captured()
+            .await
+            .unwrap();
+        assert_eq!(code, 2);
+        assert_eq!(output, "out\nerr\n");
     }
 
     #[tokio::test]
