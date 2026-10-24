@@ -1138,6 +1138,7 @@ name = "package"
 version = "0.1.0"
 dependencies = [
  "contract",
+ "node-semver",
  "serde",
  "serde_json",
  "tokio",
@@ -1188,6 +1189,7 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 name = "pipeline"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-recursion",
  "contract",
  "debug",
@@ -1380,6 +1382,7 @@ dependencies = [
  "network",
  "node-semver",
  "package",
+ "serde_json",
  "tokio",
 ]
 
