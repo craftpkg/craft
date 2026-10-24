@@ -33,6 +33,9 @@ struct RegistryState {
     packuments: HashMap<String, Value>,
     tarballs: HashMap<String, Vec<u8>>,
     requested_paths: Vec<String>,
+    /// When set, every request must carry `Authorization: Bearer <token>`.
+    required_token: Option<String>,
+    authorizations: Vec<Option<String>>,
 }
 
 impl MockRegistry {
@@ -120,6 +123,17 @@ impl MockRegistry {
         self
     }
 
+    /// Answers 401 to any request without `Authorization: Bearer <token>`.
+    pub fn require_token(&self, token: &str) -> &Self {
+        lock(&self.state).required_token = Some(token.to_string());
+        self
+    }
+
+    /// The `Authorization` header of every request so far, in order.
+    pub fn authorizations(&self) -> Vec<Option<String>> {
+        lock(&self.state).authorizations.clone()
+    }
+
     /// Every request path received so far, in order, with `%2f`-encoded scopes decoded.
     pub fn requested_paths(&self) -> Vec<String> {
         lock(&self.state).requested_paths.clone()
@@ -137,6 +151,24 @@ impl Drop for MockRegistry {
 }
 
 impl RegistryState {
+    fn respond_authorized(&mut self, url: &str, authorization: Option<String>) -> MockResponse {
+        let expected = self
+            .required_token
+            .as_ref()
+            .map(|token| format!("Bearer {token}"));
+        let is_authorized = expected.is_none() || expected == authorization;
+        self.authorizations.push(authorization);
+        if !is_authorized {
+            self.requested_paths.push(decode_path(url));
+            return MockResponse {
+                status: 401,
+                content_type: "application/json",
+                body: br#"{"error":"Unauthorized"}"#.to_vec(),
+            };
+        }
+        self.respond(url)
+    }
+
     fn respond(&mut self, url: &str) -> MockResponse {
         let path = decode_path(url);
         self.requested_paths.push(path.clone());
@@ -202,6 +234,7 @@ fn serve(stream: &TcpStream, state: &Mutex<RegistryState>) {
         return;
     }
     let mut header_line = String::new();
+    let mut authorization = None;
     loop {
         header_line.clear();
         let is_end_of_headers = matches!(reader.read_line(&mut header_line), Ok(0) | Err(_))
@@ -209,14 +242,19 @@ fn serve(stream: &TcpStream, state: &Mutex<RegistryState>) {
         if is_end_of_headers {
             break;
         }
+        if let Some((name, value)) = header_line.split_once(':')
+            && name.trim().eq_ignore_ascii_case("authorization")
+        {
+            authorization = Some(value.trim().to_string());
+        }
     }
 
     let path = request_line.split_whitespace().nth(1).unwrap_or("/");
-    let response = lock(state).respond(path);
-    let reason = if response.status == 200 {
-        "OK"
-    } else {
-        "Not Found"
+    let response = lock(state).respond_authorized(path, authorization);
+    let reason = match response.status {
+        200 => "OK",
+        401 => "Unauthorized",
+        _ => "Not Found",
     };
     let head = format!(
         "HTTP/1.1 {} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
