@@ -422,7 +422,6 @@ fn replaces_a_dangling_bin_directory() {
 }
 
 #[test]
-#[ignore = "fixed by 1.14: a string bin on a scoped package is linked as .bin/@scope/name"]
 fn links_string_bins_of_scoped_packages() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("@scope/tool", "1.0.0").string_bin("cli.js"));
@@ -439,6 +438,73 @@ fn links_string_bins_of_scoped_packages() {
         .assert()
         .success()
         .stdout(contains("tool @scope/tool@1.0.0"));
+}
+
+#[test]
+fn links_every_file_under_directories_bin() {
+    let registry = MockRegistry::start();
+    registry.publish(
+        PackageFixture::new("scripts-pkg", "1.0.0")
+            .manifest_field("directories", json!({ "bin": "./scripts" }))
+            .file(
+                "scripts/hello",
+                "#!/bin/sh\necho hello from directories.bin\n",
+            ),
+    );
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "scripts-pkg": "^1.0.0" } }),
+    );
+
+    project.craft().arg("install").assert().success();
+
+    project
+        .craft()
+        .arg("hello")
+        .assert()
+        .success()
+        .stdout(contains("hello from directories.bin"));
+}
+
+#[test]
+fn keeps_the_first_package_alphabetically_when_bins_conflict() {
+    let registry = MockRegistry::start();
+    registry
+        .publish(PackageFixture::new("a-tool", "1.0.0").bin("shared", "cli.js"))
+        .publish(PackageFixture::new("b-tool", "1.0.0").bin("shared", "cli.js"));
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "b-tool": "^1.0.0", "a-tool": "^1.0.0" } }),
+    );
+
+    for _ in 0..3 {
+        project
+            .craft()
+            .arg("install")
+            .assert()
+            .success()
+            .stderr(contains(
+                "warning: bin shared of b-tool conflicts with a-tool",
+            ));
+        project
+            .craft()
+            .arg("shared")
+            .assert()
+            .success()
+            .stdout(contains("a-tool@1.0.0"));
+    }
+}
+
+#[test]
+fn keeps_bin_links_inside_node_modules_bin() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("evil", "1.0.0").bin("../../escaped", "cli.js"));
+    let project = Project::new(&registry, json!({ "dependencies": { "evil": "^1.0.0" } }));
+
+    project.craft().arg("install").assert().success();
+
+    assert!(project.path().join("node_modules/.bin/escaped").exists());
+    assert!(std::fs::symlink_metadata(project.path().join("escaped")).is_err());
 }
 
 #[test]
