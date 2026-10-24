@@ -1,3 +1,4 @@
+use crate::Integrity;
 use contract::{NetworkError, Result};
 use reqwest::{Client, Response};
 use serde::de::DeserializeOwned;
@@ -23,10 +24,19 @@ impl Network {
         Ok(data)
     }
 
-    /// Downloads `from_url` to `store_path`, which only ever holds a complete download.
-    pub async fn download(&self, from_url: &str, store_path: PathBuf) -> Result<()> {
+    /// Downloads `from_url` to `store_path`, which only ever holds a complete download that
+    /// matched `integrity`.
+    pub async fn download(
+        &self,
+        from_url: &str,
+        store_path: PathBuf,
+        integrity: Option<&Integrity>,
+    ) -> Result<()> {
         let response = successful(from_url, self.client.get(from_url).send().await?)?;
         let bytes = response.bytes().await?;
+        if let Some(integrity) = integrity {
+            integrity.verify(&bytes)?;
+        }
 
         tokio::task::spawn_blocking(move || write_atomically(&store_path, &bytes)).await?
     }
