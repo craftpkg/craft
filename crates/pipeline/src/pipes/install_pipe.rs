@@ -51,6 +51,12 @@ impl InstallPipe {
         self
     }
 
+    /// Resolves only from the lockfile; anything it doesn't record is an error.
+    pub fn frozen(mut self) -> Self {
+        self.resolver = self.resolver.frozen();
+        self
+    }
+
     #[async_recursion::async_recursion]
     async fn resolve_package(
         &self,
