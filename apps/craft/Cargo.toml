@@ -8,6 +8,7 @@ cli = { path = "../../crates/cli" }
 manager = { path = "../../crates/manager" }
 contract = { path = "../../crates/contract" }
 debug = { path = "../../crates/debug" }
+progress = { path = "../../crates/progress" }
 anyhow = "1.0"
 
 tokio = { version = "1.0", features = ["full"] }
