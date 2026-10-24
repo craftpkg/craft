@@ -76,7 +76,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 5.6 | Metadata disk cache (ETag / 304) | P2 | [x] |
 | 5.7 | Registry configuration (`.npmrc`, scopes, auth) | P1 | [x] |
 | **Phase 6 — CLI & UX** | | | |
-| 6.1 | Progress output and install summary | P2 | [ ] |
+| 6.1 | Progress output and install summary | P2 | [x] |
 | 6.2 | Error reporting (no panics, contextual messages) | P2 | [ ] |
 | 6.3 | Missing commands and flags | P2 | [~] basics done; why/list/outdated/update/exec/trust open |
 | 6.4 | Windows support (shims, junctions) | P2 | [ ] |
@@ -682,7 +682,9 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 
 ## Phase 6 — CLI & UX
 
-### 6.1 Progress output and summary · P2
+### 6.1 Progress output and summary · P2 — ✔ done
+
+> Done: `progress::Reporter` (carried by `Context`) draws one live status line on an interactive terminal — `Resolving dependencies… 143 packages`, `Linking 218 packages`, `Running install scripts` — and falls back to plain output when stderr isn't a terminal, in CI or with `--verbose`; `--silent` prints nothing but warnings and errors. Warnings go through `Reporter::warn`, which pauses the status line instead of garbling it. After `install` / `add` / `ci` the project's own dependency changes are listed against the previous lockfile (`+ react 19.2.0`, `+ ms 2.1.3 (dev)`, `- lodash 4.17.21`, `~ react 19.2.0 → 18.3.1`), then `N packages installed in X.Xs`; `remove` lists what it removed. Not done: deprecation warnings (needs `deprecated` from the packument).
 
 - `craft install` prints nothing without `-v`. Wire `crates/progress` (indicatif): resolving / downloading / linking phases with counts.
 - Final summary: `+ react 19.2.0`, `- lodash 4.17.21`, `N packages installed in X.Xs`, peer warnings, skipped install scripts, deprecations.
