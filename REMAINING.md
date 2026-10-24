@@ -7,6 +7,13 @@ Work through tasks top to bottom: each phase unblocks the next. Tick a task's bo
 `apps/craft/tests/e2e/`. `cargo test -p craft --test e2e -- --ignored` lists what's still broken; when a task
 lands, delete the `#[ignore]` on its tests.
 
+**Real-world tests:** `make real-world` runs `apps/craft/tests/real_world/` (ignored by default, and in CI's
+`registry-tests` job) against registry.npmjs.org, JSR and GitHub with pinned real packages: an Express server, React SSR
+with Redux and React Query sharing one React, a `craft dlx create-vite` project that installs and builds, TypeScript and
+Prettier through bins and scripts, esbuild / SWC / Lightning CSS platform binaries, a trusted `bcrypt` build, foreign
+platform installs, git / tarball / JSR / `file:` / `link:` sources, aliases, outdated / update / list / why / remove,
+offline and frozen installs, and dlx. Projects share one craft home per run, so the store is exercised concurrently.
+
 Legend: **P0** broken installs / crashes · **P1** wrong behaviour · **P2** performance, DX, hygiene ·
 ✅ reproduced against the real binary · 📖 found by code reading
 
@@ -487,7 +494,7 @@ project/node_modules/
 
 ### 2.1 Global content-addressed store · P0 — ✔ done
 
-> Done: packages are extracted to `~/.craft/store/v1/<name>@<version>-<hash12>` (`@scope/x` → `@scope+x`; hash of the integrity, or of the tarball URL when a registry gives none), and tarball/`file:`/git sources to `tarball-`/`file-`/`git-<hash12>`. Entries hold the package files directly (no `package/` subdir). Registry tarballs are downloaded beside their entry and deleted once extracted, so a store entry is only ever produced from a verified download; the cached-tarball recheck from 1.7 went with them. `craft cache clean` removes the store and the old `~/.craft/packages`. Until 2.2 the linker still writes each package's dependency links inside its store entry, so entries are not yet immutable.
+> Done: packages are extracted to `~/.craft/store/v1/<name>@<version>-<hash12>` (`@scope/x` → `@scope+x`; hash of the integrity, or of the tarball URL when a registry gives none), and tarball/`file:`/git sources to `tarball-`/`file-`/`git-<hash12>`. Entries hold the package files directly (no `package/` subdir). Registry tarballs are downloaded beside their entry and deleted once extracted, so a store entry is only ever produced from a verified download; the cached-tarball recheck from 1.7 went with them. `craft cache clean` removes the store and the old `~/.craft/packages`. Each process downloads to its own `<entry>.<pid>.tgz`: with one shared name, concurrent installs into an empty store deleted each other's tarball before extracting it (found by the real-world suite; `concurrent_installs_into_an_empty_shared_store_succeed` reproduces it every run). Until 2.2 the linker still writes each package's dependency links inside its store entry, so entries are not yet immutable.
 
 - Extracted packages live in `~/.craft/store/v1/` keyed by integrity (or `name@version` + integrity check), written atomically (1.6), never modified afterwards (optionally `chmod -w`).
 - Tarballs can be deleted after extraction (or kept under `~/.craft/cache/tarballs` for `cache clean` granularity).
@@ -721,7 +728,7 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 
 ### 6.5 Release & docs accuracy · P2 — ✔ done
 
-> Done: the release workflow builds `aarch64-unknown-linux-gnu` (native arm64 runner) and static `x86_64`/`aarch64-unknown-linux-musl`, and publishes a `<asset>.sha256` beside every binary. reqwest now uses rustls with the OS's root certificates instead of OpenSSL, so musl builds need no system libraries (npm and JSR installs re-verified over HTTPS). `install.sh` picks the musl build on musl systems, verifies the checksum (refuses a mismatch, warns when a release has none), installs to `/usr/local/bin` when writable or `~/.local/bin` without sudo, and takes `CRAFT_INSTALL_DIR`, `CRAFT_VERSION` and `CRAFT_DOWNLOAD_URL`; tested against a local release server with a valid, a tampered and a missing checksum. The README drops the `package-lock.json` and "`craft init` coming soon" claims and documents every command, the store and virtual-store layout, `craft.lock`, `trustedDependencies`, `.npmrc` keys and the `CRAFT_*` variables.
+> Done: the release workflow builds `aarch64-unknown-linux-gnu` (native arm64 runner) and static `x86_64`/`aarch64-unknown-linux-musl`, and publishes a `<asset>.sha256` beside every binary. reqwest now uses rustls with bundled Mozilla root certificates instead of OpenSSL, so musl builds need no system libraries or CA bundle (npm and JSR installs re-verified over HTTPS); like npm, private CAs are trusted through `cafile`. OS roots were tried first and dropped: loading the macOS keychain made parallel runs 6× slower and would fail in containers without `ca-certificates`. `install.sh` picks the musl build on musl systems, verifies the checksum (refuses a mismatch, warns when a release has none), installs to `/usr/local/bin` when writable or `~/.local/bin` without sudo, and takes `CRAFT_INSTALL_DIR`, `CRAFT_VERSION` and `CRAFT_DOWNLOAD_URL`; tested against a local release server with a valid, a tampered and a missing checksum. The README drops the `package-lock.json` and "`craft init` coming soon" claims and documents every command, the store and virtual-store layout, `craft.lock`, `trustedDependencies`, `.npmrc` keys and the `CRAFT_*` variables.
 >
 > Not verified locally: the new CI matrix entries themselves; they run on the next tag.
 
