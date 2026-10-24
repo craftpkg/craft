@@ -71,8 +71,8 @@ impl LifecyclePipe {
             .filter(|(_, node)| !matches!(node.artifact.source, ArtifactSource::Link { .. }))
             .filter(|(id, node)| !self.store.built_marker(id, &node.artifact).exists())
             .filter_map(|(id, node)| {
-                let manifest = node.artifact.package.as_ref()?;
                 let package_dir = self.store.package_dir(id, &node.artifact);
+                let manifest = installed_manifest(&package_dir)?;
                 let scripts: Vec<(String, String)> = manifest
                     .install_scripts(&package_dir)
                     .into_iter()
@@ -189,6 +189,13 @@ impl Pipeline<LifecycleReport> for LifecyclePipe {
         }
         Ok(report)
     }
+}
+
+/// The package.json shipped inside the installed package: registry metadata may leave
+/// `scripts` out, the package itself never does.
+fn installed_manifest(package_dir: &std::path::Path) -> Option<package::PackageJson> {
+    let content = std::fs::read_to_string(package_dir.join("package.json")).ok()?;
+    serde_json::from_str(&content).ok()
 }
 
 /// Nodes reachable from the roots without passing through an optional dependency.
