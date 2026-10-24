@@ -13,6 +13,7 @@ resolver = { path = "../resolver" }
 package = { path = "../package" }
 debug = { path = "../debug" }
 process = { path = "../process" }
+fsutil = { path = "../fsutil" }
 tokio = { version = "1.48.0", features = ["full"] }
 serde_json = "1.0"
 anyhow = "1.0"
