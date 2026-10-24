@@ -84,6 +84,15 @@ pub enum ScriptError {
 
 #[derive(Error, Debug)]
 pub enum LockfileError {
+    #[error("craft.lock is missing; run `craft install` to create it")]
+    Missing,
+
+    #[error("craft.lock is out of date with package.json: {}; run `craft install` to update it", .differences.join(", "))]
+    OutOfDate { differences: Vec<String> },
+
+    #[error("{dependency} is not in craft.lock; run `craft install` to update it")]
+    NotLocked { dependency: String },
+
     #[error(
         "craft.lock has lockfileVersion {found}, but this craft reads up to {supported}; upgrade craft"
     )]
