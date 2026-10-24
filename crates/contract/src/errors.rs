@@ -83,6 +83,14 @@ pub enum ScriptError {
 }
 
 #[derive(Error, Debug)]
+pub enum LockfileError {
+    #[error(
+        "craft.lock has lockfileVersion {found}, but this craft reads up to {supported}; upgrade craft"
+    )]
+    UnsupportedVersion { found: u32, supported: u32 },
+}
+
+#[derive(Error, Debug)]
 pub enum PackageError {
     #[error("no package.json found")]
     NoPackageJson,
