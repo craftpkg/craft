@@ -1,6 +1,7 @@
 use crate::Integrity;
-use contract::{NetworkError, Result};
-use reqwest::{Client, Response};
+use contract::{NetworkError, RegistryConfig, Result};
+use reqwest::header::AUTHORIZATION;
+use reqwest::{Certificate, Client, ClientBuilder, NoProxy, Proxy, RequestBuilder, Response};
 use serde::de::DeserializeOwned;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -8,18 +9,34 @@ use std::path::{Path, PathBuf};
 #[derive(Debug)]
 pub struct Network {
     client: Client,
+    registry: RegistryConfig,
 }
 
 impl Network {
-    pub fn new() -> Self {
+    /// A client honouring the registry configuration's proxy, TLS and CA settings, which sends
+    /// each URL the credentials configured for its host and nothing else.
+    pub fn new(registry: &RegistryConfig) -> Self {
+        let client = configured_client(registry).build().unwrap_or_else(|error| {
+            eprintln!("warning: ignoring network settings from .npmrc: {error}");
+            Client::new()
+        });
         Self {
-            client: Client::new(),
+            client,
+            registry: registry.clone(),
+        }
+    }
+
+    fn get(&self, url: &str) -> RequestBuilder {
+        let request = self.client.get(url);
+        match self.registry.credentials_for(url) {
+            Some(credentials) => request.header(AUTHORIZATION, credentials.header()),
+            None => request,
         }
     }
 
     /// Fetch JSON data from a URL and deserialize it into type [T]
     pub async fn fetch<T: DeserializeOwned>(&self, url: &str) -> Result<T> {
-        let response = successful(url, self.client.get(url).send().await?)?;
+        let response = successful(url, self.get(url).send().await?)?;
         let data = response.json::<T>().await?;
         Ok(data)
     }
@@ -32,7 +49,7 @@ impl Network {
         store_path: PathBuf,
         integrity: Option<&Integrity>,
     ) -> Result<()> {
-        let response = successful(from_url, self.client.get(from_url).send().await?)?;
+        let response = successful(from_url, self.get(from_url).send().await?)?;
         let bytes = response.bytes().await?;
         if let Some(integrity) = integrity {
             integrity.verify(&bytes)?;
@@ -44,7 +61,44 @@ impl Network {
 
 impl Default for Network {
     fn default() -> Self {
-        Self::new()
+        Self::new(&RegistryConfig::default())
+    }
+}
+
+fn configured_client(registry: &RegistryConfig) -> ClientBuilder {
+    let mut builder = Client::builder().danger_accept_invalid_certs(!registry.strict_ssl);
+    let no_proxy = registry.no_proxy.as_deref().and_then(NoProxy::from_string);
+    if let Some(url) = &registry.https_proxy {
+        builder = with_proxy(builder, Proxy::https(url.as_str()), url, &no_proxy);
+    }
+    if let Some(url) = &registry.http_proxy {
+        builder = with_proxy(builder, Proxy::http(url.as_str()), url, &no_proxy);
+    }
+
+    if let Some(cafile) = &registry.cafile {
+        let certificates = std::fs::read(cafile)
+            .map_err(|error| error.to_string())
+            .and_then(|pem| Certificate::from_pem(&pem).map_err(|error| error.to_string()));
+        match certificates {
+            Ok(certificate) => builder = builder.add_root_certificate(certificate),
+            Err(error) => eprintln!("warning: ignoring cafile {}: {error}", cafile.display()),
+        }
+    }
+    builder
+}
+
+fn with_proxy(
+    builder: ClientBuilder,
+    proxy: reqwest::Result<Proxy>,
+    url: &str,
+    no_proxy: &Option<NoProxy>,
+) -> ClientBuilder {
+    match proxy {
+        Ok(proxy) => builder.proxy(proxy.no_proxy(no_proxy.clone())),
+        Err(error) => {
+            eprintln!("warning: ignoring proxy {url}: {error}");
+            builder
+        }
     }
 }
 
@@ -76,7 +130,7 @@ mod tests {
 
     #[test]
     fn test_network_new() {
-        let network = Network::new();
+        let network = Network::new(&RegistryConfig::default());
         assert!(std::mem::size_of_val(&network.client) > 0);
     }
 
