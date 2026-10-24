@@ -80,6 +80,14 @@ pub enum ScriptError {
 
     #[error("{name} exited with code {code}")]
     Failed { name: String, code: i32 },
+
+    #[error("{event} script of {package} failed with exit code {code}:\n{output}")]
+    InstallFailed {
+        package: String,
+        event: String,
+        code: i32,
+        output: String,
+    },
 }
 
 #[derive(Error, Debug)]
