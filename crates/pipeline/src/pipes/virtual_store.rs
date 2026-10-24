@@ -45,13 +45,14 @@ impl VirtualStore {
     }
 }
 
-/// `<name>@<version>` for registry packages (`@scope/x` → `@scope+x`); other sources are told
-/// apart by a hash of where they came from.
+/// The instance id for registry packages — `<name>@<version>`, plus `_<peer>@<version>` for
+/// each resolved peer — with `/` escaped (`@scope/x` → `@scope+x`); other sources are told apart
+/// by a hash of their id.
 fn entry_name(node_id: &NodeId, artifact: &ResolvedArtifact) -> String {
     let name = artifact.name.replace('/', "+");
     let source_hash = || short_hash(&node_id.to_string());
     let entry = match &artifact.source {
-        ArtifactSource::Registry { .. } => format!("{name}@{}", artifact.version),
+        ArtifactSource::Registry { .. } => node_id.to_string().replace('/', "+"),
         ArtifactSource::Tarball { .. } => format!("{name}@tarball+{}", source_hash()),
         ArtifactSource::LocalTarball { .. } | ArtifactSource::Directory { .. } => {
             format!("{name}@file+{}", source_hash())
@@ -104,6 +105,21 @@ mod tests {
             store.package_dir(&id, &query),
             PathBuf::from(
                 "/app/node_modules/.craft/@tanstack+query-core@5.90.10/node_modules/@tanstack/query-core"
+            )
+        );
+    }
+
+    #[test]
+    fn test_peer_variants_get_their_own_entry() {
+        let store = VirtualStore::new(Path::new("/app/node_modules"));
+        let query = artifact("@tanstack/react-query", registry());
+        let id = NodeId::new("@tanstack/react-query", "5.90.10")
+            .with_peers([&NodeId::new("react", "19.2.0")]);
+
+        assert_eq!(
+            store.modules_dir(&id, &query),
+            PathBuf::from(
+                "/app/node_modules/.craft/@tanstack+react-query@5.90.10_react@19.2.0/node_modules"
             )
         );
     }
