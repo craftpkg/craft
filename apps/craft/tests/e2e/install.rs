@@ -294,7 +294,6 @@ fn installs_tarballs_with_a_non_standard_root_dir() {
 }
 
 #[test]
-#[ignore = "fixed by 1.5: a registry 404 surfaces as a JSON parse error"]
 fn names_the_missing_package_in_the_error() {
     let registry = MockRegistry::start();
     let project = Project::new(
@@ -309,6 +308,47 @@ fn names_the_missing_package_in_the_error() {
         .failure()
         .stderr(contains("this-package-does-not-exist"))
         .stderr(contains("not found"));
+}
+
+#[test]
+fn names_the_dependency_chain_of_a_missing_transitive_package() {
+    let registry = MockRegistry::start();
+    registry
+        .publish(PackageFixture::new("app-framework", "4.0.0").dependency("body-parser", "^1.0.0"))
+        .publish(PackageFixture::new("body-parser", "1.2.0").dependency("ghost", "^1.0.0"));
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "app-framework": "^4.0.0" } }),
+    );
+
+    project
+        .craft()
+        .arg("install")
+        .assert()
+        .failure()
+        .stderr(contains(
+            "failed to install ghost@^1.0.0 (required by app-framework@4.0.0 > body-parser@1.2.0)",
+        ))
+        .stderr(contains("package ghost not found in"));
+}
+
+#[test]
+fn reports_a_missing_tarball_without_caching_the_error_body() {
+    let registry = MockRegistry::start();
+    registry
+        .publish(PackageFixture::new("ms", "2.1.3"))
+        .remove_tarball("ms", "2.1.3");
+    let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+
+    project
+        .craft()
+        .arg("install")
+        .assert()
+        .failure()
+        .stderr(contains("failed to download ms@2.1.3"))
+        .stderr(contains("HTTP 404"));
+
+    assert!(!project.craft_home().join("packages/ms-2.1.3.tgz").exists());
 }
 
 #[test]
