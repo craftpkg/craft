@@ -1,3 +1,3 @@
 pub mod pipes;
 
-pub use pipes::{InstallPipe, Installation, LinkerPipe, ResolvedRoot};
+pub use pipes::{InstallPipe, LinkerPipe};
