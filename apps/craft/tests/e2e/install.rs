@@ -156,7 +156,6 @@ fn fails_without_package_json() {
 }
 
 #[test]
-#[ignore = "fixed by 1.1: dist-tag specs panic in the npm resolver"]
 fn resolves_dist_tags() {
     let registry = MockRegistry::start();
     registry
@@ -175,7 +174,6 @@ fn resolves_dist_tags() {
 }
 
 #[test]
-#[ignore = "fixed by 1.1: prefer the latest dist-tag when it satisfies the range"]
 fn prefers_latest_dist_tag_within_range() {
     let registry = MockRegistry::start();
     registry
@@ -301,7 +299,7 @@ fn replaces_dangling_symlinks_in_node_modules() {
 }
 
 #[test]
-#[ignore = "fixed by 1.13: file: dependencies are looked up in the npm registry"]
+#[ignore = "fixed by 1.13: file: dependencies are reported as unsupported"]
 fn installs_file_dependencies() {
     let registry = MockRegistry::start();
     let project = Project::new(
