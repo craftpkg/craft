@@ -1,0 +1,16 @@
+[package]
+name = "testkit"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+base64 = "0.22"
+flate2 = "1.0"
+serde_json = "1.0"
+sha2 = "0.10"
+tar = "0.4"
+tiny_http = "0.12"
