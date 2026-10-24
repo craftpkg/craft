@@ -37,6 +37,12 @@ pub enum SpecError {
 }
 
 #[derive(Error, Debug)]
+pub enum TarballError {
+    #[error("tarball entry escapes the package directory: {path}")]
+    UnsafePath { path: String },
+}
+
+#[derive(Error, Debug)]
 pub enum PackageError {
     #[error("no package.json found")]
     NoPackageJson,
