@@ -9,6 +9,7 @@ use tokio::process::Command;
 /// Exit code reported for a child that ended without one and without a known signal.
 const UNKNOWN_FAILURE_CODE: i32 = 1;
 /// Shells report a child killed by signal N as 128 + N.
+#[cfg(unix)]
 const SIGNAL_EXIT_BASE: i32 = 128;
 
 pub struct Process {
@@ -16,6 +17,10 @@ pub struct Process {
     args: Vec<OsString>,
     cwd: Option<PathBuf>,
     envs: Vec<(OsString, OsString)>,
+    /// A script for `cmd /s /c`, which must reach cmd exactly as written: the standard
+    /// argument quoting escapes `"` as `\"`, which cmd does not understand.
+    #[cfg(windows)]
+    verbatim_script: Option<String>,
 }
 
 impl Process {
@@ -25,17 +30,21 @@ impl Process {
             args: Vec::new(),
             cwd: None,
             envs: Vec::new(),
+            #[cfg(windows)]
+            verbatim_script: None,
         }
     }
 
     /// Runs `script` through the platform shell: `sh -c` on Unix, `cmd /d /s /c` on Windows.
     pub fn shell(script: &str) -> Self {
         #[cfg(unix)]
-        let process = Self::new("sh").arg("-c");
-        #[cfg(windows)]
-        let process = Self::new("cmd").args(["/d", "/s", "/c"]);
+        return Self::new("sh").arg("-c").arg(script);
 
-        process.arg(script)
+        #[cfg(windows)]
+        Self {
+            verbatim_script: Some(format!("\"{script}\"")),
+            ..Self::new("cmd").args(["/d", "/s", "/c"])
+        }
     }
 
     pub fn arg(mut self, arg: impl AsRef<OsStr>) -> Self {
@@ -68,18 +77,11 @@ impl Process {
     /// child through the terminal's process group, so craft keeps waiting instead of dying
     /// first and orphaning it.
     pub async fn run(self) -> Result<i32> {
-        let mut command = Command::new(&self.command);
+        let mut command = self.command();
         command
-            .args(&self.args)
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
-        if let Some(cwd) = &self.cwd {
-            command.current_dir(cwd);
-        }
-        for (key, value) in &self.envs {
-            command.env(key, value);
-        }
 
         let mut child = command
             .spawn()
@@ -99,14 +101,8 @@ impl Process {
     /// Runs to completion with stdout and stderr captured together, for output that is only
     /// shown when something goes wrong.
     pub async fn run_captured(self) -> Result<(i32, String)> {
-        let mut command = Command::new(&self.command);
-        command.args(&self.args).stdin(Stdio::null());
-        if let Some(cwd) = &self.cwd {
-            command.current_dir(cwd);
-        }
-        for (key, value) in &self.envs {
-            command.env(key, value);
-        }
+        let mut command = self.command();
+        command.stdin(Stdio::null());
 
         let output = command
             .output()
@@ -115,6 +111,24 @@ impl Process {
         let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
         combined.push_str(&String::from_utf8_lossy(&output.stderr));
         Ok((exit_code(output.status), combined))
+    }
+}
+
+impl Process {
+    fn command(&self) -> Command {
+        let mut command = Command::new(&self.command);
+        command.args(&self.args);
+        #[cfg(windows)]
+        if let Some(script) = &self.verbatim_script {
+            command.raw_arg(script);
+        }
+        if let Some(cwd) = &self.cwd {
+            command.current_dir(cwd);
+        }
+        for (key, value) in &self.envs {
+            command.env(key, value);
+        }
+        command
     }
 }
 
