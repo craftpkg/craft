@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -16,6 +16,7 @@ use crate::package_fixture::{PackageFixture, unscoped_name};
 /// [`PackageFixture`]s. Stops when dropped.
 pub struct MockRegistry {
     url: String,
+    certificate_pem: Option<String>,
     address: SocketAddr,
     stopping: Arc<AtomicBool>,
     state: Arc<Mutex<RegistryState>>,
@@ -40,6 +41,8 @@ struct RegistryState {
     /// When set, every request must carry `Authorization: Bearer <token>`.
     required_token: Option<String>,
     authorizations: Vec<Option<String>>,
+    /// The host of every request that arrived in proxy form (`GET http://host/path`).
+    proxied_hosts: Vec<String>,
     user_agents: Vec<Option<String>>,
     /// Requests left to fail, with the status and `Retry-After` to fail them with.
     pending_failures: Option<(usize, u16, Option<u64>)>,
@@ -52,11 +55,35 @@ struct RegistryState {
 
 impl MockRegistry {
     pub fn start() -> Self {
+        Self::listen(None)
+    }
+
+    /// The same registry over HTTPS, with a freshly generated self-signed certificate for
+    /// `127.0.0.1` that clients have to be told to trust ([`MockRegistry::certificate_pem`]).
+    pub fn start_tls() -> Self {
+        let certified = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])
+            .expect("generate a self-signed certificate");
+        let certificate_pem = certified.cert.pem();
+        let key = rustls::pki_types::PrivatePkcs8KeyDer::from(certified.key_pair.serialize_der());
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let config = rustls::ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .expect("TLS protocol versions")
+            .with_no_client_auth()
+            .with_single_cert(vec![certified.cert.der().clone()], key.into())
+            .expect("TLS server config");
+        let mut registry = Self::listen(Some(Arc::new(config)));
+        registry.certificate_pem = Some(certificate_pem);
+        registry
+    }
+
+    fn listen(tls: Option<Arc<rustls::ServerConfig>>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("mock registry binds");
         let address = listener.local_addr().expect("mock registry has an address");
         let stopping = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(RegistryState::default()));
 
+        let scheme = if tls.is_some() { "https" } else { "http" };
         let acceptor = {
             let stopping = Arc::clone(&stopping);
             let state = Arc::clone(&state);
@@ -69,13 +96,15 @@ impl MockRegistry {
                         continue;
                     };
                     let state = Arc::clone(&state);
-                    std::thread::spawn(move || serve(&stream, &state));
+                    let tls = tls.clone();
+                    std::thread::spawn(move || serve(stream, tls, &state));
                 }
             })
         };
 
         Self {
-            url: format!("http://{address}"),
+            url: format!("{scheme}://{address}"),
+            certificate_pem: None,
             address,
             stopping,
             state,
@@ -85,6 +114,11 @@ impl MockRegistry {
 
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    /// The PEM certificate a [`MockRegistry::start_tls`] registry presents.
+    pub fn certificate_pem(&self) -> Option<&str> {
+        self.certificate_pem.as_deref()
     }
 
     /// Publishes a version and, like `npm publish`, points `latest` at it.
@@ -171,6 +205,11 @@ impl MockRegistry {
     /// The `Authorization` header of every request so far, in order.
     pub fn authorizations(&self) -> Vec<Option<String>> {
         lock(&self.state).authorizations.clone()
+    }
+
+    /// The hosts requested through this registry acting as an HTTP proxy, in order.
+    pub fn proxied_hosts(&self) -> Vec<String> {
+        lock(&self.state).proxied_hosts.clone()
     }
 
     /// Every request path received so far, in order, with `%2f`-encoded scopes decoded.
@@ -305,13 +344,26 @@ fn decode_path(url: &str) -> String {
 
 /// Answers one GET per connection and closes it, so clients never hold idle keep-alive
 /// connections open against the registry.
-fn serve(stream: &TcpStream, state: &Mutex<RegistryState>) {
+fn serve(stream: TcpStream, tls: Option<Arc<rustls::ServerConfig>>, state: &Mutex<RegistryState>) {
     {
         let mut state = lock(state);
         state.in_flight += 1;
         state.max_in_flight = state.max_in_flight.max(state.in_flight);
     }
-    answer(stream, state);
+    match tls {
+        Some(config) => {
+            if let Ok(connection) = rustls::ServerConnection::new(config) {
+                let mut stream = rustls::StreamOwned::new(connection, stream);
+                answer(&mut stream, state);
+                stream.conn.send_close_notify();
+                let _ = stream.flush();
+            }
+        }
+        None => {
+            let mut stream = stream;
+            answer(&mut stream, state);
+        }
+    }
     lock(state).in_flight -= 1;
 }
 
@@ -319,9 +371,9 @@ fn serve(stream: &TcpStream, state: &Mutex<RegistryState>) {
 /// limits become observable.
 const RESPONSE_DELAY: std::time::Duration = std::time::Duration::from_millis(5);
 
-fn answer(stream: &TcpStream, state: &Mutex<RegistryState>) {
+fn answer<S: Read + Write>(stream: &mut S, state: &Mutex<RegistryState>) {
     std::thread::sleep(RESPONSE_DELAY);
-    let mut reader = BufReader::new(stream);
+    let mut reader = BufReader::new(&mut *stream);
     let mut request_line = String::new();
     if reader.read_line(&mut request_line).is_err() {
         return;
@@ -349,8 +401,18 @@ fn answer(stream: &TcpStream, state: &Mutex<RegistryState>) {
         }
     }
 
-    let path = request_line.split_whitespace().nth(1).unwrap_or("/");
-    let response = lock(state).respond_authorized(path, authorization, user_agent, if_none_match);
+    let target = request_line.split_whitespace().nth(1).unwrap_or("/");
+    let path = match target.split_once("://") {
+        Some((_, rest)) => {
+            let (host, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+            lock(state).proxied_hosts.push(host.to_string());
+            if path.is_empty() { "/" } else { path }
+        }
+        None => target,
+    }
+    .to_string();
+    drop(reader);
+    let response = lock(state).respond_authorized(&path, authorization, user_agent, if_none_match);
     let reason = match response.status {
         200 => "OK",
         304 => "Not Modified",
@@ -376,8 +438,7 @@ fn answer(stream: &TcpStream, state: &Mutex<RegistryState>) {
         response.body.len()
     );
 
-    let mut writer = stream;
-    let _ = writer.write_all(head.as_bytes());
-    let _ = writer.write_all(&response.body);
-    let _ = writer.flush();
+    let _ = stream.write_all(head.as_bytes());
+    let _ = stream.write_all(&response.body);
+    let _ = stream.flush();
 }
