@@ -1,39 +1,29 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use contract::{Context, Pipeline, Result};
 use futures::stream::{self, StreamExt};
 use package::InstallPackage;
-use resolver::{ResolvedArtifact, Resolver};
+use resolver::{
+    DependencyKind, Edge, NodeId, ResolutionGraph, ResolvedArtifact, ResolvedNode, Resolver,
+};
 use tarball::gzip::unzip;
 use tokio::sync::Mutex;
 
-type LockedPackage = Arc<Mutex<HashMap<String, Arc<Mutex<Option<ResolvedArtifact>>>>>>;
+const DEPENDENCY_CONCURRENCY: usize = 10;
 
-/// Everything an install resolved: every artifact in the tree, and the artifact each
-/// requested root package resolved to.
-#[derive(Debug, Clone)]
-pub struct Installation {
-    pub artifacts: Vec<ResolvedArtifact>,
-    pub roots: Vec<ResolvedRoot>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ResolvedRoot {
-    pub package: InstallPackage,
-    pub artifact: ResolvedArtifact,
-}
+type RequestSlot = Arc<Mutex<Option<NodeId>>>;
 
 pub struct InstallPipe {
     packages: Vec<InstallPackage>,
     cache_dir: PathBuf,
     resolver: Resolver,
-    // - None means resolution is in progress
-    // - Some(artifact) means resolution is complete
-    locked_packages: LockedPackage,
-    // Lock for unzipping artifacts to prevent race conditions
-    unzip_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    // One slot per distinct name + spec; it holds the node that request resolved to.
+    requests: Mutex<HashMap<String, RequestSlot>>,
+    // Nodes already being fetched, so each version is downloaded and walked once.
+    claimed_nodes: Mutex<HashSet<NodeId>>,
+    nodes: Mutex<BTreeMap<NodeId, ResolvedNode>>,
 }
 
 impl InstallPipe {
@@ -44,100 +34,99 @@ impl InstallPipe {
             packages,
             resolver: Resolver::new(cache_dir.clone(), context.registry.clone()),
             cache_dir,
-            locked_packages: Arc::new(Mutex::new(HashMap::new())),
-            unzip_locks: Arc::new(Mutex::new(HashMap::new())),
+            requests: Mutex::new(HashMap::new()),
+            claimed_nodes: Mutex::new(HashSet::new()),
+            nodes: Mutex::new(BTreeMap::new()),
         }
     }
 
     #[async_recursion::async_recursion]
-    async fn resolve_package(&self, package: &InstallPackage) -> Result<()> {
-        debug::info!("Resolving package: {package:?}");
-
-        let cache_key = package.to_cache_key();
-
-        // Get or create a lock for this specific package
-        let package_lock = {
-            let mut cache = self.locked_packages.lock().await;
-
-            // If already cached, return immediately
-            if let Some(existing_lock) = cache.get(&cache_key) {
-                existing_lock.clone()
-            } else {
-                // Create a new lock with None (indicating work in progress)
-                let new_lock = Arc::new(Mutex::new(None));
-                cache.insert(cache_key.clone(), new_lock.clone());
-                new_lock
-            }
+    async fn resolve_package(&self, package: &InstallPackage) -> Result<NodeId> {
+        let slot = {
+            let mut requests = self.requests.lock().await;
+            requests.entry(package.to_cache_key()).or_default().clone()
         };
 
-        // Lock this specific package (wait if another thread is working on it)
-        let mut artifact_slot = package_lock.lock().await;
-
-        // If already resolved by another thread, return it
-        if let Some(_artifact) = artifact_slot.as_ref() {
-            debug::info!("Package {} already resolved by another thread", cache_key);
-            return Ok(());
+        let mut resolved = slot.lock().await;
+        if let Some(node_id) = resolved.as_ref() {
+            return Ok(node_id.clone());
         }
 
-        // This thread won the race - do the actual work
-        debug::info!("This thread will resolve {}", cache_key);
+        debug::info!("Resolving package: {package:?}");
         let artifact = self.resolver.resolve(package).await?;
-        let download_artifact = self.resolver.download(&artifact).await?;
+        let node_id = NodeId::new(&artifact.name, &artifact.version);
+        *resolved = Some(node_id.clone());
+        // Released before recursing so cyclic dependencies find this node instead of waiting on it.
+        drop(resolved);
 
-        // Store the result so other threads can use it
-        *artifact_slot = Some(artifact.clone());
+        let is_first_request_for_node = self.claimed_nodes.lock().await.insert(node_id.clone());
+        if !is_first_request_for_node {
+            return Ok(node_id);
+        }
 
-        // Release lock before recursion to avoid deadlocks
-        drop(artifact_slot);
+        self.fetch(&artifact).await?;
+        let dependencies = self.resolve_dependencies(&artifact).await?;
 
-        // Synchronize unzipping
-        let unzip_key = format!("{}@{}", artifact.name, artifact.version);
-        let unzip_lock = {
-            let mut locks = self.unzip_locks.lock().await;
-            locks
-                .entry(unzip_key)
-                .or_insert_with(|| Arc::new(Mutex::new(())))
-                .clone()
-        };
-        let _unzip_guard = unzip_lock.lock().await;
+        self.nodes.lock().await.insert(
+            node_id.clone(),
+            ResolvedNode {
+                artifact,
+                dependencies,
+            },
+        );
+        Ok(node_id)
+    }
 
+    async fn fetch(&self, artifact: &ResolvedArtifact) -> Result<()> {
+        let download_artifact = self.resolver.download(artifact).await?;
         let unzip_dir = self
             .cache_dir
             .join(format!("{}-{}", artifact.name, artifact.version));
 
-        if !unzip_dir.exists() {
-            unzip(download_artifact.path, unzip_dir).await?;
-        } else {
+        if unzip_dir.exists() {
             debug::info!("Package {} already unzipped", artifact.name);
+            return Ok(());
         }
-        drop(_unzip_guard);
+        unzip(download_artifact.path, unzip_dir).await
+    }
 
-        if let Some(deps) = artifact.package.and_then(|p| p.dependencies) {
-            debug::info!("Installing dependencies for {}: {:?}", artifact.name, deps);
+    async fn resolve_dependencies(&self, artifact: &ResolvedArtifact) -> Result<Vec<Edge>> {
+        let Some(dependencies) = artifact
+            .package
+            .as_ref()
+            .and_then(|package| package.dependencies.clone())
+        else {
+            return Ok(Vec::new());
+        };
+        debug::info!(
+            "Resolving dependencies for {}: {:?}",
+            artifact.name,
+            dependencies
+        );
 
-            let dep_packages: Vec<InstallPackage> = deps
-                .into_iter()
-                .map(|(name, version)| InstallPackage::new(name, Some(version), false))
-                .collect();
+        let results: Vec<Result<Edge>> = stream::iter(dependencies)
+            .map(|(name, spec)| async move {
+                let package = InstallPackage::new(name.clone(), Some(spec.clone()), false);
+                let target = self.resolve_package(&package).await?;
+                Ok(Edge {
+                    name,
+                    spec: Some(spec),
+                    target,
+                    kind: DependencyKind::Production,
+                })
+            })
+            .buffer_unordered(DEPENDENCY_CONCURRENCY)
+            .collect()
+            .await;
 
-            // Process dependencies in parallel
-            let results: Vec<Result<()>> = stream::iter(dep_packages)
-                .map(|pkg| async move { self.resolve_package(&pkg).await })
-                .buffer_unordered(10) // Concurrency limit for dependencies
-                .collect()
-                .await;
-
-            for result in results {
-                result?;
-            }
-        }
-
-        Ok(())
+        let mut edges = results.into_iter().collect::<Result<Vec<_>>>()?;
+        edges.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(edges)
     }
 }
 
-impl Pipeline<Installation> for InstallPipe {
-    async fn run(&self) -> Result<Installation> {
+impl Pipeline<ResolutionGraph> for InstallPipe {
+    async fn run(&self) -> Result<ResolutionGraph> {
         debug::trace!("Installing packages: {pkgs:?}", pkgs = self.packages);
 
         // Clone packages to avoid lifetime issues with async closures
@@ -154,49 +143,28 @@ impl Pipeline<Installation> for InstallPipe {
             concurrency
         );
 
-        // Process packages in parallel with dynamic concurrency limit
-        let results: Vec<Result<()>> = stream::iter(packages)
-            .map(|pkg| async move { self.resolve_package(&pkg).await })
-            .buffer_unordered(concurrency)
+        let results: Vec<Result<Edge>> = stream::iter(packages)
+            .map(|package| async move {
+                let target = self.resolve_package(&package).await?;
+                let kind = if package.is_dev {
+                    DependencyKind::Development
+                } else {
+                    DependencyKind::Production
+                };
+                Ok(Edge {
+                    name: package.name,
+                    spec: package.version,
+                    target,
+                    kind,
+                })
+            })
+            .buffered(concurrency)
             .collect()
             .await;
 
-        // Check for any errors
-        for result in results {
-            result?;
-        }
+        let roots = results.into_iter().collect::<Result<Vec<_>>>()?;
+        let nodes = self.nodes.lock().await.clone();
 
-        // Collect all resolved artifacts and deduplicate
-        let locked = self.locked_packages.lock().await;
-        let mut artifacts = Vec::new();
-        let mut seen = HashSet::new();
-
-        for lock in locked.values() {
-            let artifact_guard = lock.lock().await;
-            if let Some(artifact) = artifact_guard.as_ref() {
-                let key = format!("{}@{}", artifact.name, artifact.version);
-                if !seen.contains(&key) {
-                    seen.insert(key);
-                    artifacts.push(artifact.clone());
-                }
-            }
-        }
-
-        let mut roots = Vec::with_capacity(self.packages.len());
-        for package in &self.packages {
-            let resolved = match locked.get(&package.to_cache_key()) {
-                Some(lock) => lock.lock().await.clone(),
-                None => None,
-            };
-            let artifact = resolved.ok_or_else(|| {
-                anyhow::anyhow!("{} was requested but never resolved", package.name)
-            })?;
-            roots.push(ResolvedRoot {
-                package: package.clone(),
-                artifact,
-            });
-        }
-
-        Ok(Installation { artifacts, roots })
+        Ok(ResolutionGraph { roots, nodes })
     }
 }
