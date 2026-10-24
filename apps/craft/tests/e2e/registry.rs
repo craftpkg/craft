@@ -243,3 +243,186 @@ fn retries_an_interrupted_tarball_download() {
     assert_eq!(requests_for(&registry, tarball), 3);
     assert_eq!(checkout.required_version("ms"), Ok("2.1.3".to_string()));
 }
+
+#[test]
+fn sends_basic_credentials_from_auth_or_username_and_password() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("private-lib", "1.0.0"));
+    let user_and_password = "Basic dXNlcjpwYXNz";
+    let configs = [
+        format!("//{}/:_auth=dXNlcjpwYXNz\n", host_of(&registry)),
+        format!(
+            "//{0}/:username=user\n//{0}/:_password=cGFzcw==\n",
+            host_of(&registry)
+        ),
+    ];
+
+    for config in configs {
+        let project = Project::new(
+            &registry,
+            json!({ "dependencies": { "private-lib": "^1.0.0" } }),
+        );
+        project.write_file(".npmrc", &config);
+        project.craft().arg("install").assert().success();
+    }
+
+    let authorizations = registry.authorizations();
+    assert_eq!(authorizations.len(), 4);
+    assert!(
+        authorizations
+            .iter()
+            .all(|authorization| authorization.as_deref() == Some(user_and_password))
+    );
+}
+
+#[test]
+fn layers_the_user_npmrc_under_the_project_npmrc() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("private-lib", "1.0.0"));
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "private-lib": "^1.0.0" } }),
+    );
+    let token_line = |token: &str| format!("//{}/:_authToken={token}\n", host_of(&registry));
+    let sent_token = || {
+        registry
+            .authorizations()
+            .last()
+            .cloned()
+            .flatten()
+            .unwrap_or_default()
+    };
+    let reinstall = || {
+        let _ = std::fs::remove_file(project.path().join("craft.lock"));
+        let _ = std::fs::remove_dir_all(project.path().join("node_modules"));
+        let _ = std::fs::remove_dir_all(project.craft_home().join("store"));
+        let _ = std::fs::remove_dir_all(project.craft_home().join("cache"));
+    };
+
+    std::fs::write(project.craft_home().join(".npmrc"), token_line("user"))
+        .expect("write the user npmrc");
+    project.craft().arg("install").assert().success();
+    assert_eq!(sent_token(), "Bearer user");
+
+    let other_config = project.craft_home().join("other.npmrc");
+    std::fs::write(&other_config, token_line("userconfig")).expect("write another npmrc");
+    reinstall();
+    let mut command = assert_cmd::Command::from_std(project.craft_process());
+    command
+        .arg("install")
+        .env("NPM_CONFIG_USERCONFIG", &other_config)
+        .assert()
+        .success();
+    assert_eq!(sent_token(), "Bearer userconfig");
+
+    project.write_file(".npmrc", &token_line("project"));
+    reinstall();
+    project.craft().arg("install").assert().success();
+    assert_eq!(sent_token(), "Bearer project");
+}
+
+#[test]
+fn reads_settings_from_npm_config_variables() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+    registry.fail_next(1, 503, None);
+
+    let mut command = assert_cmd::Command::from_std(project.craft_process());
+    command
+        .arg("install")
+        .env("npm_config_fetch_retries", "0")
+        .assert()
+        .failure()
+        .stderr(contains("503"));
+}
+
+#[test]
+fn fetches_through_the_configured_proxy() {
+    let proxy = MockRegistry::start();
+    proxy.publish(PackageFixture::new("ms", "2.1.3"));
+    let project = Project::new(&proxy, json!({ "dependencies": { "ms": "^2.0.0" } }));
+    project.write_file(".npmrc", &format!("proxy={}\n", proxy.url()));
+
+    let mut command = assert_cmd::Command::from_std(project.craft_process());
+    command
+        .arg("install")
+        .env("CRAFT_REGISTRY", "http://registry.example.invalid")
+        .assert()
+        .success();
+
+    assert_eq!(project.required_version("ms"), Ok("2.1.3".to_string()));
+    assert!(
+        proxy
+            .proxied_hosts()
+            .contains(&"registry.example.invalid".to_string())
+    );
+}
+
+#[test]
+fn bypasses_the_proxy_for_noproxy_hosts() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+    project.write_file(
+        ".npmrc",
+        "proxy=http://127.0.0.1:9\nnoproxy=127.0.0.1\nfetch-retries=0\n",
+    );
+
+    project.craft().arg("install").assert().success();
+
+    assert_eq!(project.required_version("ms"), Ok("2.1.3".to_string()));
+    assert!(registry.proxied_hosts().is_empty());
+}
+
+#[test]
+fn rejects_a_registry_certificate_it_does_not_trust() {
+    let registry = MockRegistry::start_tls();
+    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+
+    project
+        .craft()
+        .arg("install")
+        .assert()
+        .failure()
+        .stderr(contains(format!(
+            "could not verify the certificate of {} (invalid peer certificate: UnknownIssuer)",
+            host_of(&registry).trim_start_matches("https://")
+        )))
+        .stderr(contains(
+            "point cafile in .npmrc at your registry's CA certificate",
+        ));
+    assert_eq!(registry.requested_paths().len(), 0);
+}
+
+#[test]
+fn trusts_a_registry_certificate_from_cafile() {
+    let registry = MockRegistry::start_tls();
+    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+    project.write_file(
+        "ca.pem",
+        registry
+            .certificate_pem()
+            .expect("a TLS registry has a certificate"),
+    );
+    let cafile = project.path().join("ca.pem");
+    project.write_file(".npmrc", &format!("cafile={}\n", cafile.display()));
+
+    project.craft().arg("install").assert().success();
+
+    assert_eq!(project.required_version("ms"), Ok("2.1.3".to_string()));
+}
+
+#[test]
+fn skips_certificate_checks_without_strict_ssl() {
+    let registry = MockRegistry::start_tls();
+    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+    project.write_file(".npmrc", "strict-ssl=false\n");
+
+    project.craft().arg("install").assert().success();
+
+    assert_eq!(project.required_version("ms"), Ok("2.1.3".to_string()));
+}
