@@ -28,6 +28,19 @@ pub struct RegistryConfig {
     /// How many requests each client keeps in flight (`network-concurrency`, 16 by default as
     /// in pnpm).
     pub network_concurrency: usize,
+    pub network_mode: NetworkMode,
+}
+
+/// How much craft may rely on its metadata cache instead of the registry.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum NetworkMode {
+    /// Use cached metadata while the registry says it is fresh, revalidate it otherwise.
+    #[default]
+    Online,
+    /// Use any cached metadata as is; only fetch what is missing.
+    PreferOffline,
+    /// Never touch the network.
+    Offline,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -70,6 +83,7 @@ impl Default for RegistryConfig {
             cafile: None,
             fetch_retries: DEFAULT_FETCH_RETRIES,
             network_concurrency: DEFAULT_NETWORK_CONCURRENCY,
+            network_mode: NetworkMode::Online,
         }
     }
 }
@@ -200,6 +214,10 @@ impl RegistryConfig {
                 if let Ok(retries) = value.parse() {
                     self.fetch_retries = retries;
                 }
+            }
+            "offline" if value == "true" => self.network_mode = NetworkMode::Offline,
+            "prefer-offline" if value == "true" && self.network_mode == NetworkMode::Online => {
+                self.network_mode = NetworkMode::PreferOffline;
             }
             "network-concurrency" => {
                 if let Ok(concurrency) = value.parse::<usize>() {
