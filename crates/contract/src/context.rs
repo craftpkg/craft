@@ -45,6 +45,12 @@ impl Context {
         self.craft_home.join("packages")
     }
 
+    pub fn package_dir(&self, name: &str, version: &str) -> PathBuf {
+        self.package_cache_dir()
+            .join(format!("{name}-{version}"))
+            .join("package")
+    }
+
     pub fn node_modules_dir(&self) -> PathBuf {
         self.cwd.join("node_modules")
     }
@@ -126,6 +132,10 @@ mod tests {
         assert_eq!(
             context.package_json_path(),
             PathBuf::from("/work/app/package.json")
+        );
+        assert_eq!(
+            context.package_dir("@types/node", "22.20.5"),
+            PathBuf::from("/home/me/.craft/packages/@types/node-22.20.5/package")
         );
     }
 }
