@@ -1,3 +1,5 @@
+use crate::constants::CRAFT_VERSION;
+
 /// The platform packages are installed for, named the way Node and package manifests name it
 /// (`darwin` / `linux` / `win32`, `x64` / `arm64`, `glibc` / `musl`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +52,14 @@ impl std::fmt::Display for HostPlatform {
     }
 }
 
+/// npm's format (`<manager>/<version> <platform> <arch>`), sent to registries and given to
+/// scripts, which read it to detect the package manager that started them.
+pub fn user_agent() -> String {
+    let platform = node_os(std::env::consts::OS);
+    let arch = node_cpu(std::env::consts::ARCH);
+    format!("craft/{CRAFT_VERSION} {platform} {arch}")
+}
+
 /// Node's `process.platform` for a Rust `std::env::consts::OS`.
 pub fn node_os(os: &str) -> &str {
     match os {
@@ -84,6 +94,11 @@ fn detect_libc() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_user_agent_names_craft() {
+        assert!(user_agent().starts_with(&format!("craft/{CRAFT_VERSION} ")));
+    }
 
     #[test]
     fn test_maps_rust_names_to_node_names() {
