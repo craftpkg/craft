@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use contract::{Context, Result};
 use lockfile::{LockedDependency, LockedSource, Lockfile};
 use package::{InstallPackage, PackageJson};
-use pipeline::{INSTALLED_LOCKFILE, VIRTUAL_STORE_DIR, lockfile_from_graph};
+use pipeline::{INSTALLED_STATE, ScriptPolicy, VIRTUAL_STORE_DIR, lockfile_from_graph};
 use resolver::ResolutionGraph;
 
 use crate::install_actor::manifest_packages;
@@ -13,16 +13,26 @@ pub(crate) async fn save_lockfile(
     context: &Context,
     graph: &ResolutionGraph,
     specifiers: &HashMap<String, String>,
+    policy: &ScriptPolicy,
 ) -> Result<()> {
     let lockfile = lockfile_from_graph(graph, specifiers, &context.cwd);
     lockfile.save(&context.cwd).await?;
-    mark_installed(context, &lockfile).await
+    mark_installed(context, &lockfile, policy).await
 }
 
-pub(crate) async fn mark_installed(context: &Context, lockfile: &Lockfile) -> Result<()> {
-    let marker = installed_lockfile_path(context);
-    fsutil::write_if_changed(&marker, lockfile.render()?.as_bytes()).await?;
+pub(crate) async fn mark_installed(
+    context: &Context,
+    lockfile: &Lockfile,
+    policy: &ScriptPolicy,
+) -> Result<()> {
+    let marker = installed_state_path(context);
+    fsutil::write_if_changed(&marker, installed_state(lockfile, policy)?.as_bytes()).await?;
     Ok(())
+}
+
+/// The lockfile plus the script policy: changing either means the next install has work to do.
+fn installed_state(lockfile: &Lockfile, policy: &ScriptPolicy) -> Result<String> {
+    Ok(format!("{}{}\n", lockfile.render()?, policy.describe()))
 }
 
 /// Whether the lockfile may answer `package`: only while package.json still lists it with
@@ -45,6 +55,7 @@ pub(crate) async fn is_up_to_date(
     context: &Context,
     lockfile: Option<&Lockfile>,
     package_json: &PackageJson,
+    policy: &ScriptPolicy,
 ) -> bool {
     let Some(lockfile) = lockfile else {
         return false;
@@ -59,9 +70,9 @@ pub(crate) async fn is_up_to_date(
         return false;
     }
 
-    let marker = installed_lockfile_path(context);
+    let marker = installed_state_path(context);
     let installed = tokio::fs::read_to_string(&marker).await.ok();
-    let current = lockfile.render().ok();
+    let current = installed_state(lockfile, policy).ok();
     installed.is_some() && installed == current
 }
 
@@ -125,11 +136,11 @@ fn locked_entry<'a>(
         .filter(|locked| Some(&locked.specifier) == package.version.as_ref())
 }
 
-/// A copy of the lockfile `node_modules` was last laid out from, so an unchanged project can
-/// skip the install entirely.
-fn installed_lockfile_path(context: &Context) -> std::path::PathBuf {
+/// What `node_modules` was last laid out from, so an unchanged project can skip the install
+/// entirely.
+fn installed_state_path(context: &Context) -> std::path::PathBuf {
     context
         .node_modules_dir()
         .join(VIRTUAL_STORE_DIR)
-        .join(INSTALLED_LOCKFILE)
+        .join(INSTALLED_STATE)
 }
