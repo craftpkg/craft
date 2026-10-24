@@ -62,7 +62,7 @@ craft ci                      # clean, frozen install for CI
 craft cache clean --force     # remove the global store and metadata cache
 ```
 
-Global flags: `--offline` (never touch the network), `--prefer-offline` (use cached metadata without revalidating), `--silent`, `--verbose`. Every command has `--help`.
+Global flags: `--offline` (never touch the network), `--prefer-offline` (use cached metadata without revalidating), `--silent`, `--debug`. `craft -v` prints the version. Every command has `--help`.
 
 ## 🧠 How it works
 
