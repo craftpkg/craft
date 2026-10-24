@@ -1,24 +1,42 @@
 use std::collections::HashMap;
 
-use contract::{Actor, Context, Pipeline, Result};
+use contract::{Actor, Context, LockfileError, Pipeline, Result};
 use lockfile::Lockfile;
 use package::{InstallPackage, PackageJson};
 use pipeline::{InstallPipe, LinkerPipe};
 
-use crate::lock_state::{is_up_to_date, save_lockfile, with_lock_preference};
+use crate::lock_state::{
+    is_up_to_date, lock_differences, mark_installed, save_lockfile, with_lock_preference,
+};
 
 pub struct InstallActor {
     context: Context,
+    options: InstallOptions,
 }
 
-impl Actor<()> for InstallActor {
-    fn with(context: Context, _: ()) -> Self {
-        Self { context }
+#[derive(Debug, Default, Clone, Copy)]
+pub struct InstallOptions {
+    /// Install exactly what craft.lock records, failing if it is missing or out of date.
+    pub frozen_lockfile: bool,
+    /// Start from an empty `node_modules`, as `craft ci` does.
+    pub clean: bool,
+}
+
+impl Actor<InstallOptions> for InstallActor {
+    fn with(context: Context, options: InstallOptions) -> Self {
+        Self { context, options }
     }
 
     async fn run(&self) -> Result<()> {
+        if self.options.clean {
+            fsutil::remove_entry(&self.context.node_modules_dir()).await?;
+        }
         let package_json = PackageJson::from_file(&self.context.package_json_path()).await?;
         let lockfile = Lockfile::load(&self.context.cwd).await?;
+        let is_frozen = self.options.frozen_lockfile || self.context.ci;
+        if is_frozen {
+            ensure_lockfile_matches(lockfile.as_ref(), &package_json)?;
+        }
         if is_up_to_date(&self.context, lockfile.as_ref(), &package_json).await {
             println!("Already up to date");
             return Ok(());
@@ -30,13 +48,29 @@ impl Actor<()> for InstallActor {
             .collect();
         debug::trace!("Installing packages from package.json: {packages:?}");
 
-        let graph = InstallPipe::new(&self.context, packages)
-            .with_lockfile(lockfile.as_ref())
-            .run()
-            .await?;
+        let mut pipe = InstallPipe::new(&self.context, packages).with_lockfile(lockfile.as_ref());
+        if is_frozen {
+            pipe = pipe.frozen();
+        }
+        let graph = pipe.run().await?;
         LinkerPipe::new(&self.context, graph.clone()).run().await?;
-        save_lockfile(&self.context, &graph, &manifest_specifiers(&package_json)).await
+
+        match lockfile.filter(|_| is_frozen) {
+            Some(lockfile) => mark_installed(&self.context, &lockfile).await,
+            None => save_lockfile(&self.context, &graph, &manifest_specifiers(&package_json)).await,
+        }
     }
+}
+
+/// A frozen install needs a lockfile that already records every dependency as package.json
+/// declares it.
+fn ensure_lockfile_matches(lockfile: Option<&Lockfile>, package_json: &PackageJson) -> Result<()> {
+    let lockfile = lockfile.ok_or(LockfileError::Missing)?;
+    let differences = lock_differences(lockfile, package_json);
+    if differences.is_empty() {
+        return Ok(());
+    }
+    Err(LockfileError::OutOfDate { differences }.into())
 }
 
 /// Each declared dependency's spec as package.json lists it.
@@ -82,7 +116,7 @@ mod tests {
             false,
         );
 
-        let actor = InstallActor::with(context, ());
+        let actor = InstallActor::with(context, InstallOptions::default());
         let result = actor.run().await;
 
         assert!(result.is_err());
@@ -92,7 +126,7 @@ mod tests {
     #[test]
     fn test_install_actor_creation() {
         let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false);
-        let actor = InstallActor::with(context, ());
+        let actor = InstallActor::with(context, InstallOptions::default());
         // Just verify it can be created
         drop(actor);
     }
