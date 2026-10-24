@@ -36,7 +36,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 0.1 | Explicit `Context` (cwd + `CRAFT_HOME`) instead of process-global env/cwd | P2 | [x] |
 | 0.2 | Test isolation: no real installs or env mutation in unit tests | P2 | [x] |
 | 0.3 | Mock registry + end-to-end test harness | P2 | [x] |
-| 0.4 | Lint/CI hygiene (`clippy --all-targets`, fmt, workspace lints, dead code) | P2 | [ ] |
+| 0.4 | Lint/CI hygiene (`clippy --all-targets`, fmt, workspace lints, dead code) | P2 | [x] |
 | **Phase 1 — Correctness fixes (current layout)** | | | |
 | 1.1 | Dependency spec classification — no more panics | P0 | [ ] |
 | 1.2 | `InstallPipe` returns a resolution graph, not a flat list | P0 | [ ] |
@@ -140,7 +140,11 @@ peer deps, root alias, transitive alias, `@types`-style tarball root, dist-tag s
 dangling symlink in `node_modules`, failing script exit code, scoped package with string `bin`,
 404 package, corrupt tarball / wrong integrity, optional platform dep.
 
-### 0.4 Lint / CI hygiene · P2 ✅
+### 0.4 Lint / CI hygiene · P2 ✅ — ✔ done
+
+> Done: `make lint` runs `cargo fmt --check` + `clippy --workspace --all-targets -D warnings`; `clippy.toml` sets `allow-unwrap-in-tests`; `process`/`tarball` moved to edition 2024 with workspace lints; template `add()`, `InstallPackage::satisfies` and the `semver` dependency removed; the verbose log filter covers every workspace crate (actor logs were previously dropped); `Cli::normalize` returns a new `cli::Action` enum so the manager only sees `Add`/`Remove`/`Run`/`Cache`/`Install`; CI runs `make` on Ubuntu and macOS.
+>
+> Deferred: denying `clippy::expect_used` outside tests waits for 1.1 (most remaining `expect`s are the panics 1.1 removes); `windows-latest` joins the CI matrix in 6.4, since bins and directory links don't work on Windows yet.
 
 **Problem**
 - `cargo clippy --all-targets` fails: 14 `unwrap_used` errors in `crates/actor/src/{install_actor,remove_package_actor}.rs` tests. CI passes only because the Makefile lints without `--all-targets`.
@@ -199,6 +203,7 @@ pub enum DependencySpec {
 - Range resolution should match npm: prefer `dist-tags.latest` when it satisfies the range, else highest satisfying non-prerelease.
 - Until 1.13 / Phase 7, `Git`/`Tarball`/`File`/`Link`/`Workspace` return a clear `unsupported dependency type` error — never a panic.
 - Replace every `expect("should not panic")` in `npm.rs` and `linker_pipe.rs` with fallible code (skip unparsable registry versions with a `debug::warning!`).
+- Then deny `clippy::expect_used` outside tests in the workspace lints (deferred from 0.4).
 
 **Done when** the spec table above is unit-tested; the E2E dist-tag fixture installs; no `expect` remains in `resolver`/`pipeline` non-test code.
 
@@ -609,7 +614,7 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 - Bins: generate `.cmd` + `.ps1` + sh shims (like `cmd-shim`) instead of `symlink_file` (`linker_pipe.rs:259`).
 - Directory links: junctions (no admin/Developer Mode needed) instead of `symlink_dir` (`linker_pipe.rs:90`, `191`).
 - `PATH` separator and `Path`/`PATH` casing in 1.12; `cmd /C` quoting.
-- Add `windows-latest` to CI (0.4).
+- Add `windows-latest` to the CI matrix (deferred from 0.4) once the e2e suite passes there.
 
 ### 6.5 Release & docs accuracy · P2
 
