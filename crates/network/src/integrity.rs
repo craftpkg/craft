@@ -70,14 +70,62 @@ impl Integrity {
     }
 
     pub fn verify(&self, bytes: &[u8]) -> Result<(), IntegrityError> {
-        let actual = digest(self.algorithm, bytes);
-        if self.digests.contains(&actual) {
+        let mut hasher = self.hasher();
+        hasher.update(bytes);
+        hasher.verify()
+    }
+
+    /// Checks content fed in pieces, so a download can be verified while it streams to disk.
+    pub fn hasher(&self) -> IntegrityHasher<'_> {
+        let state = match self.algorithm {
+            Algorithm::Sha1 => HasherState::Sha1(Sha1::new()),
+            Algorithm::Sha256 => HasherState::Sha256(Sha256::new()),
+            Algorithm::Sha384 => HasherState::Sha384(Sha384::new()),
+            Algorithm::Sha512 => HasherState::Sha512(Sha512::new()),
+        };
+        IntegrityHasher {
+            integrity: self,
+            state,
+        }
+    }
+}
+
+pub struct IntegrityHasher<'a> {
+    integrity: &'a Integrity,
+    state: HasherState,
+}
+
+enum HasherState {
+    Sha1(Sha1),
+    Sha256(Sha256),
+    Sha384(Sha384),
+    Sha512(Sha512),
+}
+
+impl IntegrityHasher<'_> {
+    pub fn update(&mut self, bytes: &[u8]) {
+        match &mut self.state {
+            HasherState::Sha1(hasher) => hasher.update(bytes),
+            HasherState::Sha256(hasher) => hasher.update(bytes),
+            HasherState::Sha384(hasher) => hasher.update(bytes),
+            HasherState::Sha512(hasher) => hasher.update(bytes),
+        }
+    }
+
+    pub fn verify(self) -> Result<(), IntegrityError> {
+        let actual = match self.state {
+            HasherState::Sha1(hasher) => BASE64.encode(hasher.finalize()),
+            HasherState::Sha256(hasher) => BASE64.encode(hasher.finalize()),
+            HasherState::Sha384(hasher) => BASE64.encode(hasher.finalize()),
+            HasherState::Sha512(hasher) => BASE64.encode(hasher.finalize()),
+        };
+        if self.integrity.digests.contains(&actual) {
             return Ok(());
         }
 
         Err(IntegrityError::Mismatch {
-            expected: self.to_string(),
-            actual: format!("{}-{actual}", self.algorithm),
+            expected: self.integrity.to_string(),
+            actual: format!("{}-{actual}", self.integrity.algorithm),
         })
     }
 }
@@ -175,6 +223,19 @@ mod tests {
     #[test]
     fn test_sha512_of_matches_sri() {
         assert_eq!(Integrity::sha512_of(b"hello").to_string(), HELLO_SHA512);
+    }
+
+    #[test]
+    fn test_hashes_content_fed_in_pieces() {
+        let integrity = Integrity::parse(HELLO_SHA512).unwrap();
+        let mut hasher = integrity.hasher();
+        hasher.update(b"he");
+        hasher.update(b"llo");
+        assert!(hasher.verify().is_ok());
+
+        let mut wrong = integrity.hasher();
+        wrong.update(b"hell");
+        assert!(wrong.verify().is_err());
     }
 
     #[test]
