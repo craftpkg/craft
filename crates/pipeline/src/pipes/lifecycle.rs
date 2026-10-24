@@ -112,7 +112,7 @@ impl LifecyclePipe {
                 .script_env(&package_dir, &self.context.cwd, &package)?
                 .run_captured()
                 .await?;
-            if self.context.verbose {
+            if self.context.debug {
                 eprint!("{output}");
             }
             if code != 0 {
