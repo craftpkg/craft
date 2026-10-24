@@ -64,7 +64,10 @@ impl ProjectManifest {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Err(PackageError::NoPackageJson.into());
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                let context = format!("could not read {}", path.display());
+                return Err(anyhow::Error::new(error).context(context));
+            }
         };
         Self::parse(path, &content)
     }
@@ -156,7 +159,7 @@ impl ProjectManifest {
     }
 
     pub async fn save(&self) -> Result<()> {
-        tokio::fs::write(&self.path, self.render()?).await?;
+        fsutil::write_if_changed(&self.path, self.render()?.as_bytes()).await?;
         Ok(())
     }
 }
