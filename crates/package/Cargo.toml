@@ -8,6 +8,7 @@ workspace = true
 
 [dependencies]
 contract = { path = "../contract" }
+node-semver = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["fs"] }
