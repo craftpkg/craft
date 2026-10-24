@@ -1,13 +1,14 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use crate::constants::CRAFT_HOME;
+use crate::constants::{CRAFT_HOME, CRAFT_REGISTRY, DEFAULT_REGISTRY};
 use crate::{ContextError, Result};
 
 #[derive(Debug, Clone)]
 pub struct Context {
     pub cwd: PathBuf,
     pub craft_home: PathBuf,
+    pub registry: String,
     pub verbose: bool,
 }
 
@@ -16,17 +17,28 @@ impl Context {
         Self {
             cwd,
             craft_home,
+            registry: DEFAULT_REGISTRY.to_string(),
             verbose,
         }
     }
 
     /// `craft_home` comes from `CRAFT_HOME`, falling back to `~/.craft`.
+    /// `registry` comes from `CRAFT_REGISTRY`, falling back to the public npm registry.
     pub fn from_env(verbose: bool) -> Result<Self> {
         let cwd = std::env::current_dir()?;
         let user_home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
         let craft_home = resolve_craft_home(std::env::var_os(CRAFT_HOME), user_home)?;
+        let context = Self::new(cwd, craft_home, verbose);
 
-        Ok(Self::new(cwd, craft_home, verbose))
+        match std::env::var(CRAFT_REGISTRY) {
+            Ok(registry) if !registry.is_empty() => Ok(context.with_registry(&registry)),
+            _ => Ok(context),
+        }
+    }
+
+    pub fn with_registry(mut self, registry: &str) -> Self {
+        self.registry = registry.trim_end_matches('/').to_string();
+        self
     }
 
     pub fn package_cache_dir(&self) -> PathBuf {
@@ -85,6 +97,19 @@ mod tests {
     fn test_missing_home_is_an_error() {
         let result = resolve_craft_home(None, None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_registry_defaults_to_npm() {
+        let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false);
+        assert_eq!(context.registry, "https://registry.npmjs.org");
+    }
+
+    #[test]
+    fn test_with_registry_strips_trailing_slash() {
+        let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false)
+            .with_registry("http://127.0.0.1:4873/");
+        assert_eq!(context.registry, "http://127.0.0.1:4873");
     }
 
     #[test]
