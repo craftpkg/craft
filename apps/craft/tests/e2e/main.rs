@@ -4,6 +4,7 @@ mod add;
 mod common;
 mod install;
 mod layout;
+mod peers;
 mod prune;
 mod remove;
 mod run;
