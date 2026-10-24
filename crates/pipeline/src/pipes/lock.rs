@@ -97,18 +97,19 @@ fn locked_source(artifact: &ResolvedArtifact, project_dir: &Path) -> LockedSourc
 }
 
 /// Node ids of local packages embed absolute paths; the lockfile keys them relative to the
-/// project instead.
+/// project instead, with `/` separators so the file is the same on every platform.
 fn lock_key(id: &NodeId, project_dir: &Path) -> String {
-    let project_prefix = format!("{}/", project_dir.display());
+    let project_prefix = format!("{}/", project_dir.display()).replace('\\', "/");
     id.to_string()
+        .replace('\\', "/")
         .replace(&format!("file:{project_prefix}"), "file:")
         .replace(&format!("link:{project_prefix}"), "link:")
 }
 
 fn project_relative(path: &Path, project_dir: &Path) -> String {
     fsutil::relative_target(&project_dir.join("package.json"), path)
-        .display()
-        .to_string()
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 #[cfg(test)]
