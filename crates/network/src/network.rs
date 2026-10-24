@@ -1,4 +1,7 @@
+use std::sync::Arc;
 use std::time::Duration;
+
+use tokio::sync::Semaphore;
 
 use crate::Integrity;
 use bytes::Bytes;
@@ -20,6 +23,9 @@ const MAX_JITTER_MILLIS: u64 = 250;
 pub struct Network {
     client: Client,
     registry: RegistryConfig,
+    /// Caps requests in flight; the nested parallelism of resolution would otherwise open
+    /// connections without bound.
+    permits: Arc<Semaphore>,
 }
 
 impl Network {
@@ -33,6 +39,7 @@ impl Network {
         Self {
             client,
             registry: registry.clone(),
+            permits: Arc::new(Semaphore::new(registry.network_concurrency)),
         }
     }
 
@@ -90,6 +97,11 @@ impl Network {
     }
 
     async fn attempt(&self, url: &str) -> std::result::Result<Bytes, Failure> {
+        let _permit = self.permits.acquire().await.map_err(|error| Failure {
+            error: error.into(),
+            is_retryable: false,
+            retry_after: None,
+        })?;
         let response = self
             .get(url)
             .send()
