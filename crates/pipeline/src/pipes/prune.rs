@@ -139,7 +139,10 @@ async fn dir_entries(dir: &Path) -> io::Result<Vec<(String, PathBuf)>> {
     let mut entries = match fs::read_dir(dir).await {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
+        Err(error) => {
+            let message = format!("could not read {}: {error}", dir.display());
+            return Err(io::Error::new(error.kind(), message));
+        }
     };
     let mut listed = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
