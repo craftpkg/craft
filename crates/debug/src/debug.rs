@@ -1,9 +1,9 @@
 // Re-export tracing macros
 pub use tracing::{error, info, trace, warn as warning};
 
-const WORKSPACE_CRATES: [&str; 10] = [
+const WORKSPACE_CRATES: [&str; 11] = [
     "craft", "manager", "actor", "pipeline", "resolver", "package", "network", "tarball",
-    "process", "lockfile",
+    "process", "lockfile", "fsutil",
 ];
 
 /// Initialize the debug logging system
