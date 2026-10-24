@@ -56,6 +56,35 @@ impl Actor<RunScriptActorPayload> for RunScriptActor {
     }
 }
 
+pub struct ListScriptsActor {
+    context: Context,
+}
+
+impl Actor<()> for ListScriptsActor {
+    fn with(context: Context, _: ()) -> Self {
+        Self { context }
+    }
+
+    /// Prints each script with its command, as `npm run` does without a name.
+    async fn run(&self) -> Result<()> {
+        let manifest = PackageJson::from_file(&self.context.package_json_path()).await?;
+        let mut scripts: Vec<(String, String)> =
+            manifest.scripts.unwrap_or_default().into_iter().collect();
+        if scripts.is_empty() {
+            println!("No scripts in package.json");
+            return Ok(());
+        }
+        scripts.sort();
+
+        let project = manifest.name.unwrap_or_else(|| "this project".to_string());
+        println!("Scripts in {project}:");
+        for (name, command) in scripts {
+            println!("  {name}\n    {command}");
+        }
+        Ok(())
+    }
+}
+
 impl RunScriptActor {
     /// Runs `pre<name>`, `<name>` and `post<name>`, stopping at the first failure. Only the
     /// main script receives the command-line arguments.
