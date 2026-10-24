@@ -53,7 +53,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 1.13 | Git / tarball-URL / `file:` / `link:` dependencies | P1 | [x] |
 | 1.14 | Bin linking edge cases | P1 | [x] |
 | **Phase 2 — Store & layout redesign** | | | |
-| 2.1 | Global content-addressed store (read-only) | P0 | [ ] |
+| 2.1 | Global content-addressed store (read-only) | P0 | [x] |
 | 2.2 | Per-project virtual store `node_modules/.craft` | P0 | [ ] |
 | 2.3 | Peer dependency resolution | P0 | [ ] |
 | 2.4 | Bins inside the virtual store | P1 | [ ] |
@@ -485,7 +485,9 @@ project/node_modules/
 2. Hidden hoisting into `.craft/node_modules` on by default.
 3. No migration of `~/.craft/packages`; it just stops being used.
 
-### 2.1 Global content-addressed store · P0
+### 2.1 Global content-addressed store · P0 — ✔ done
+
+> Done: packages are extracted to `~/.craft/store/v1/<name>@<version>-<hash12>` (`@scope/x` → `@scope+x`; hash of the integrity, or of the tarball URL when a registry gives none), and tarball/`file:`/git sources to `tarball-`/`file-`/`git-<hash12>`. Entries hold the package files directly (no `package/` subdir). Registry tarballs are downloaded beside their entry and deleted once extracted, so a store entry is only ever produced from a verified download; the cached-tarball recheck from 1.7 went with them. `craft cache clean` removes the store and the old `~/.craft/packages`. Until 2.2 the linker still writes each package's dependency links inside its store entry, so entries are not yet immutable.
 
 - Extracted packages live in `~/.craft/store/v1/` keyed by integrity (or `name@version` + integrity check), written atomically (1.6), never modified afterwards (optionally `chmod -w`).
 - Tarballs can be deleted after extraction (or kept under `~/.craft/cache/tarballs` for `cache clean` granularity).
