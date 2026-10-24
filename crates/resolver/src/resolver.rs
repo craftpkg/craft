@@ -17,7 +17,6 @@ pub struct Resolver {
     npm_resolver: NpmResolver,
     network: Network,
     context: Context,
-    cache_dir: PathBuf,
     // File-level locks to prevent concurrent downloads to the same file
     download_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
@@ -28,13 +27,12 @@ impl Resolver {
             npm_resolver: NpmResolver::new(context.registry.clone()),
             network: Network::new(),
             context: context.clone(),
-            cache_dir: context.package_cache_dir(),
             download_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     /// Resolves registry specs against the registry; local and URL specs are copied or
-    /// extracted into the cache here, since their name, version and dependencies come from
+    /// extracted into the store here, since their name, version and dependencies come from
     /// their own package.json.
     pub async fn resolve(&self, package: &InstallPackage) -> Result<ResolvedArtifact> {
         let spec = DependencySpec::parse(&package.name, package.version.as_deref())?;
@@ -81,35 +79,16 @@ impl Resolver {
         let ArtifactSource::Registry { tarball_url } = &artifact.source else {
             return Err(anyhow!("{artifact} is not a registry package"));
         };
-        tokio::fs::create_dir_all(&self.cache_dir).await?;
+        let file_path = tarball_path(&artifact.package_dir(&self.context));
 
-        // Construct the file path: ~/.craft/packages/{name}-{version}.tgz
-        let filename = format!("{}-{}.tgz", artifact.name, artifact.version);
-        let file_path = self.cache_dir.join(&filename);
-
-        // Get or create a lock for this specific file
         let file_lock = {
             let mut locks = self.download_locks.lock().await;
             locks
-                .entry(filename.clone())
+                .entry(file_path.display().to_string())
                 .or_insert_with(|| Arc::new(Mutex::new(())))
                 .clone()
         };
-
-        // Acquire the file-specific lock
         let _guard = file_lock.lock().await;
-
-        if is_cached(&file_path, artifact).await {
-            debug::info!(
-                "Package {} already downloaded at: {:?}",
-                artifact.name,
-                file_path
-            );
-            return Ok(DownloadArtifact {
-                key: artifact.to_cache_key(),
-                path: file_path,
-            });
-        }
 
         debug::info!("Downloading {} to: {:?}", artifact.name, file_path);
 
@@ -133,21 +112,12 @@ impl Resolver {
     }
 }
 
-/// A cached tarball counts only if it still matches the artifact's integrity; a mismatching one
-/// is downloaded again and replaced.
-async fn is_cached(file_path: &Path, artifact: &ResolvedArtifact) -> bool {
-    let Some(integrity) = &artifact.integrity else {
-        return file_path.exists();
-    };
-    let Ok(bytes) = tokio::fs::read(file_path).await else {
-        return false;
-    };
-
-    let is_intact = integrity.verify(&bytes).is_ok();
-    if !is_intact {
-        debug::warning!("Cached {} does not match its integrity", artifact);
-    }
-    is_intact
+/// Where a store entry's tarball is downloaded to before extraction: beside the entry, so the
+/// rename that publishes it never crosses filesystems.
+fn tarball_path(package_dir: &Path) -> PathBuf {
+    let mut path = package_dir.as_os_str().to_os_string();
+    path.push(".tgz");
+    PathBuf::from(path)
 }
 
 #[cfg(test)]
