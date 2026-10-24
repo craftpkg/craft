@@ -159,9 +159,11 @@ async fn download_tarball(
     url: &str,
     package_dir: &Path,
 ) -> Result<()> {
-    let tarball_path = context
-        .store_dir()
-        .join(format!("git-{}.tgz", short_hash(url)));
+    let tarball_path = context.store_dir().join(format!(
+        "git-{}{}",
+        short_hash(url),
+        crate::resolver::process_download_suffix()
+    ));
     fsutil::ensure_dir(&context.store_dir()).await?;
     network.download(url, tarball_path.clone(), None).await?;
     let extracted = unzip(tarball_path.clone(), package_dir.to_path_buf()).await;
