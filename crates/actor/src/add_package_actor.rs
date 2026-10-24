@@ -7,6 +7,8 @@ use resolver::{ArtifactSource, Edge, ResolvedArtifact};
 use crate::install_actor::{manifest_packages, manifest_specifiers};
 use crate::lock_state::{save_lockfile, with_lock_preference};
 use crate::scripts::{run_install_scripts, script_policy};
+use crate::summary::{report_changes, report_installed};
+use std::time::Instant;
 
 #[derive(Debug)]
 pub struct AddActorPayload {
@@ -35,6 +37,7 @@ impl Actor<AddActorPayload> for AddPackageActor {
     /// Installs the added packages together with everything the project already depends on,
     /// so the result is a complete install that pruning can trust.
     async fn run(&self) -> contract::Result<()> {
+        let started = Instant::now();
         let package_json_path = self.context.package_json_path();
         let mut manifest = ProjectManifest::open(&package_json_path).await?;
         let package_json = PackageJson::from_file(&package_json_path).await?;
@@ -83,7 +86,10 @@ impl Actor<AddActorPayload> for AddPackageActor {
 
         manifest.save().await?;
         debug::info!("Updated package.json");
-        save_lockfile(&self.context, &graph, &specifiers, &policy).await
+        let installed_lockfile = save_lockfile(&self.context, &graph, &specifiers, &policy).await?;
+        report_changes(&self.context, lockfile.as_ref(), &installed_lockfile);
+        report_installed(&self.context, &graph, started);
+        Ok(())
     }
 }
 
