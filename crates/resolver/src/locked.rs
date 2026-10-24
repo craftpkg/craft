@@ -5,6 +5,7 @@ use network::Integrity;
 use node_semver::Version;
 use package::VersionRequirement;
 
+use crate::git::GitSpec;
 use crate::{ArtifactSource, ResolvedArtifact};
 
 /// What `craft.lock` already decided, consulted before the registry or a git remote so an
@@ -87,6 +88,12 @@ impl LockPreferences {
 
     pub fn git_commit(&self, url: &str) -> Option<&str> {
         self.git_commits.get(url).map(String::as_str)
+    }
+
+    /// The locked commit for a git dependency spec, matched by the URL it clones.
+    pub fn git_commit_for_spec(&self, spec: &str) -> Option<&str> {
+        let git_spec = GitSpec::parse(spec)?;
+        self.git_commit(&git_spec.clone_url)
     }
 }
 
