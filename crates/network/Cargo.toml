@@ -7,9 +7,13 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "gzip", "brotli"] }
 contract = { path = "../contract" }
-tokio = { version = "1.0", features = ["rt"] }
+tokio = { version = "1.0", features = ["rt", "time"] }
+serde_json = "1.0"
+anyhow = "1.0"
+bytes = "1"
+debug = { path = "../debug" }
 serde = { version = "1.0", features = ["derive"] }
 tempfile = "3.10"
 base64 = "0.22"
