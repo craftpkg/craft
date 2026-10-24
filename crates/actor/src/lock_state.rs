@@ -14,10 +14,11 @@ pub(crate) async fn save_lockfile(
     graph: &ResolutionGraph,
     specifiers: &HashMap<String, String>,
     policy: &ScriptPolicy,
-) -> Result<()> {
+) -> Result<Lockfile> {
     let lockfile = lockfile_from_graph(graph, specifiers, &context.cwd);
     lockfile.save(&context.cwd).await?;
-    mark_installed(context, &lockfile, policy).await
+    mark_installed(context, &lockfile, policy).await?;
+    Ok(lockfile)
 }
 
 pub(crate) async fn mark_installed(
