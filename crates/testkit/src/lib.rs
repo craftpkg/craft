@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 mod package_fixture;
 mod registry;
 
