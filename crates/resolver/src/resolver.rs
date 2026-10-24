@@ -1,3 +1,4 @@
+use crate::locked::LockPreferences;
 use crate::sources::{
     resolve_directory, resolve_git, resolve_link, resolve_local_tarball, resolve_path,
     resolve_remote_tarball,
@@ -5,6 +6,7 @@ use crate::sources::{
 use crate::{ArtifactSource, NpmResolver, ResolvedArtifact, download_artifact::DownloadArtifact};
 use anyhow::{Context as _, anyhow};
 use contract::{Context, Result, SpecError};
+use lockfile::Lockfile;
 use network::Network;
 use package::{DependencySpec, InstallPackage};
 use std::collections::HashMap;
@@ -15,6 +17,7 @@ use tokio::sync::Mutex;
 #[derive(Debug)]
 pub struct Resolver {
     npm_resolver: NpmResolver,
+    locked: LockPreferences,
     network: Network,
     context: Context,
     // File-level locks to prevent concurrent downloads to the same file
@@ -25,13 +28,19 @@ impl Resolver {
     pub fn new(context: &Context) -> Self {
         Self {
             npm_resolver: NpmResolver::new(context.registry.clone()),
+            locked: LockPreferences::default(),
             network: Network::new(),
             context: context.clone(),
             download_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    /// Resolves registry specs against the registry; local and URL specs are copied or
+    pub fn with_lockfile(mut self, lockfile: &Lockfile) -> Self {
+        self.locked = LockPreferences::from_lockfile(lockfile);
+        self
+    }
+
+    /// Resolves registry specs against craft.lock, then the registry; local and URL specs are copied or
     /// extracted into the store here, since their name, version and dependencies come from
     /// their own package.json.
     pub async fn resolve(&self, package: &InstallPackage) -> Result<ResolvedArtifact> {
@@ -44,6 +53,14 @@ impl Resolver {
             | DependencySpec::Alias {
                 name, requirement, ..
             } => {
+                let locked = package
+                    .prefer_locked
+                    .then(|| self.locked.registry(name, requirement))
+                    .flatten();
+                if let Some(artifact) = locked {
+                    debug::info!("Using locked {name}@{}", artifact.version);
+                    return Ok(artifact);
+                }
                 debug::info!("Resolving npm package: {name}@{requirement}");
                 self.npm_resolver.resolve(name, requirement).await
             }
@@ -62,7 +79,8 @@ impl Resolver {
                 resolve_remote_tarball(&self.context, &self.network, requested_name, url).await
             }
             DependencySpec::Git { url, .. } => {
-                resolve_git(&self.context, &self.network, requested_name, url).await
+                let locked = package.prefer_locked.then_some(&self.locked);
+                resolve_git(&self.context, &self.network, requested_name, url, locked).await
             }
             DependencySpec::Workspace { .. } => Err(SpecError::Unsupported {
                 kind: spec.kind(),
