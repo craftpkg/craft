@@ -2,9 +2,11 @@ use std::path::{Path, PathBuf};
 
 use resolver::{ArtifactSource, NodeId, ResolvedArtifact, short_hash};
 
-pub(crate) const VIRTUAL_STORE_DIR: &str = ".craft";
+pub const VIRTUAL_STORE_DIR: &str = ".craft";
 /// The hidden hoisting directory inside the virtual store; never a package entry itself.
 pub(crate) const HOIST_DIR: &str = "node_modules";
+/// The lockfile `node_modules` was last laid out from, kept inside the virtual store.
+pub const INSTALLED_LOCKFILE: &str = "lock.json";
 /// Longer entry names are truncated and suffixed with a hash, as pnpm does, to stay well under
 /// filesystem name limits.
 const MAX_ENTRY_NAME_LENGTH: usize = 120;
