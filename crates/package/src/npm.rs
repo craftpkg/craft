@@ -42,6 +42,46 @@ pub struct PeerSpec {
 }
 
 impl PackageJson {
+    /// The project's `trustedDependencies`: the dependencies allowed to run install scripts.
+    pub fn trusted_dependencies(&self) -> Vec<String> {
+        let mut trusted: Vec<String> = self
+            .other
+            .get("trustedDependencies")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|name| name.as_str().map(str::to_string))
+            .collect();
+        trusted.sort();
+        trusted.dedup();
+        trusted
+    }
+
+    /// The install-time scripts npm runs for a dependency, in order. A package with a
+    /// `binding.gyp` and no `preinstall`/`install` script implicitly runs `node-gyp rebuild`.
+    pub fn install_scripts(&self, package_dir: &Path) -> Vec<(&'static str, String)> {
+        let script = |event: &str| {
+            self.scripts
+                .as_ref()
+                .and_then(|scripts| scripts.get(event))
+                .cloned()
+        };
+        let mut install = script("install");
+        let has_explicit_build = script("preinstall").is_some() || install.is_some();
+        if !has_explicit_build && package_dir.join("binding.gyp").is_file() {
+            install = Some("node-gyp rebuild".to_string());
+        }
+
+        [
+            ("preinstall", script("preinstall")),
+            ("install", install),
+            ("postinstall", script("postinstall")),
+        ]
+        .into_iter()
+        .filter_map(|(event, script)| Some((event, script?)))
+        .collect()
+    }
+
     /// `optionalDependencies`, read loosely like peers. npm installs these in place of a
     /// `dependencies` entry of the same name.
     pub fn optional_dependencies(&self) -> Vec<(String, String)> {
@@ -164,6 +204,44 @@ mod tests {
                 ("@esbuild/darwin-arm64".to_string(), "0.25.0".to_string()),
                 ("fsevents".to_string(), "~2.3.2".to_string()),
             ]
+        );
+    }
+
+    #[test]
+    fn test_reads_trusted_dependencies() {
+        let manifest: PackageJson = serde_json::from_str(
+            r#"{ "trustedDependencies": ["esbuild", "bcrypt", "esbuild", 1] }"#,
+        )
+        .unwrap();
+        assert_eq!(manifest.trusted_dependencies(), ["bcrypt", "esbuild"]);
+    }
+
+    #[test]
+    fn test_install_scripts_in_order_with_implicit_node_gyp() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest: PackageJson = serde_json::from_str(
+            r#"{ "scripts": { "postinstall": "node setup.js", "test": "jest" } }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            manifest.install_scripts(dir.path()),
+            [("postinstall", "node setup.js".to_string())]
+        );
+
+        std::fs::write(dir.path().join("binding.gyp"), "{}").unwrap();
+        assert_eq!(
+            manifest.install_scripts(dir.path()),
+            [
+                ("install", "node-gyp rebuild".to_string()),
+                ("postinstall", "node setup.js".to_string()),
+            ]
+        );
+
+        let explicit: PackageJson =
+            serde_json::from_str(r#"{ "scripts": { "install": "prebuild-install" } }"#).unwrap();
+        assert_eq!(
+            explicit.install_scripts(dir.path()),
+            [("install", "prebuild-install".to_string())]
         );
     }
 
