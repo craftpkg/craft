@@ -10,3 +10,4 @@ pub use install_pipe::InstallPipe;
 pub use linker_pipe::LinkerPipe;
 pub use lock::lockfile_from_graph;
 pub use prune::prune_node_modules;
+pub use virtual_store::{INSTALLED_LOCKFILE, VIRTUAL_STORE_DIR};
