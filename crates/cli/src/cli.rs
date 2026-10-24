@@ -86,6 +86,22 @@ pub enum Commands {
         #[arg(long, visible_alias = "prod")]
         production: bool,
     },
+    /// Run a bin from the project's dependencies.
+    Exec {
+        command: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Run a package's bin without adding it to the project.
+    #[command(visible_alias = "x")]
+    Dlx {
+        /// The package to install, when its bin is named differently.
+        #[arg(short, long)]
+        package: Option<String>,
+        command: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Show direct dependencies with newer versions available.
     Outdated,
     /// Update dependencies within their specifiers, or to their latest versions with --latest.
@@ -200,6 +216,15 @@ pub enum Action {
         packages: Vec<String>,
         latest: bool,
     },
+    Exec {
+        command: String,
+        args: Vec<String>,
+    },
+    Dlx {
+        package: Option<String>,
+        command: String,
+        args: Vec<String>,
+    },
 }
 
 impl Cli {
@@ -256,6 +281,19 @@ impl Cli {
                 packages: packages.clone(),
             },
             Commands::Outdated => Action::Outdated,
+            Commands::Exec { command, args } => Action::Exec {
+                command: command.clone(),
+                args: args.clone(),
+            },
+            Commands::Dlx {
+                package,
+                command,
+                args,
+            } => Action::Dlx {
+                package: package.clone(),
+                command: command.clone(),
+                args: args.clone(),
+            },
             Commands::Update { packages, latest } => Action::Update {
                 packages: packages.clone(),
                 latest: *latest,
