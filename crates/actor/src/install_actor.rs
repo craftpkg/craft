@@ -7,7 +7,8 @@ use package::{InstallPackage, PackageJson};
 use pipeline::{InstallPipe, LinkerPipe};
 
 use crate::lock_state::{
-    is_up_to_date, lock_differences, mark_installed, save_lockfile, with_lock_preference,
+    InstallMode, is_up_to_date, lock_differences, mark_installed, save_lockfile,
+    with_lock_preference,
 };
 use crate::scripts::{run_install_scripts, script_policy};
 use crate::summary::{report_changes, report_installed};
@@ -25,6 +26,8 @@ pub struct InstallOptions {
     pub clean: bool,
     /// Run no lifecycle scripts at all, the project's own included.
     pub ignore_scripts: bool,
+    /// Leave `devDependencies` out, keeping craft.lock as it is.
+    pub production: bool,
 }
 
 impl Actor<InstallOptions> for InstallActor {
@@ -40,17 +43,22 @@ impl Actor<InstallOptions> for InstallActor {
         let package_json = PackageJson::from_file(&self.context.package_json_path()).await?;
         let lockfile = Lockfile::load(&self.context.cwd).await?;
         let policy = script_policy(&package_json, self.options.ignore_scripts);
+        let mode = InstallMode {
+            policy: &policy,
+            production: self.options.production,
+        };
         let is_frozen = self.options.frozen_lockfile || self.context.ci;
         if is_frozen {
             ensure_lockfile_matches(lockfile.as_ref(), &package_json)?;
         }
-        if is_up_to_date(&self.context, lockfile.as_ref(), &package_json, &policy).await {
+        if is_up_to_date(&self.context, lockfile.as_ref(), &package_json, &mode).await {
             self.context.reporter.line("Already up to date");
             return Ok(());
         }
 
         let packages: Vec<InstallPackage> = manifest_packages(&package_json)
             .into_iter()
+            .filter(|package| self.is_installed_in_this_mode(package))
             .map(|package| with_lock_preference(lockfile.as_ref(), package))
             .collect();
         debug::trace!("Installing packages from package.json: {packages:?}");
@@ -63,19 +71,28 @@ impl Actor<InstallOptions> for InstallActor {
         LinkerPipe::new(&self.context, graph.clone()).run().await?;
         run_install_scripts(&self.context, graph.clone(), &package_json, &policy, true).await?;
 
-        let installed_lockfile = match lockfile.as_ref().filter(|_| is_frozen) {
+        let keeps_lockfile = is_frozen || self.options.production;
+        let installed_lockfile = match lockfile.as_ref().filter(|_| keeps_lockfile) {
             Some(lockfile) => {
-                mark_installed(&self.context, lockfile, &policy).await?;
+                mark_installed(&self.context, lockfile, &mode).await?;
                 lockfile.clone()
             }
             None => {
                 let specifiers = manifest_specifiers(&package_json);
-                save_lockfile(&self.context, &graph, &specifiers, &policy).await?
+                save_lockfile(&self.context, &graph, &specifiers, &mode).await?
             }
         };
         report_changes(&self.context, lockfile.as_ref(), &installed_lockfile);
         report_installed(&self.context, &graph, started);
         Ok(())
+    }
+}
+
+impl InstallActor {
+    /// A production install leaves `devDependencies` out.
+    fn is_installed_in_this_mode(&self, package: &InstallPackage) -> bool {
+        let is_omitted = self.options.production && package.is_dev;
+        !is_omitted
     }
 }
 
@@ -92,21 +109,21 @@ fn ensure_lockfile_matches(lockfile: Option<&Lockfile>, package_json: &PackageJs
 
 /// Each declared dependency's spec as package.json lists it.
 pub(crate) fn manifest_specifiers(package_json: &PackageJson) -> HashMap<String, String> {
-    [&package_json.dependencies, &package_json.dev_dependencies]
+    manifest_packages(package_json)
         .into_iter()
-        .flatten()
-        .flat_map(|section| section.iter())
-        .map(|(name, spec)| (name.clone(), spec.clone()))
+        .filter_map(|package| Some((package.name, package.version?)))
         .collect()
 }
 
-/// Every dependency and dev dependency the manifest declares, sorted by name so installs are
-/// deterministic.
+/// Every dependency, dev dependency and optional dependency the manifest declares, sorted by
+/// name so installs are deterministic. An optional entry replaces a regular one of the same
+/// name, as in npm.
 pub(crate) fn manifest_packages(package_json: &PackageJson) -> Vec<InstallPackage> {
     let sections = [
         (&package_json.dependencies, false),
         (&package_json.dev_dependencies, true),
     ];
+    let optional = package_json.optional_dependencies();
     let mut packages: Vec<InstallPackage> = sections
         .into_iter()
         .filter_map(|(section, is_dev)| Some((section.as_ref()?, is_dev)))
@@ -115,6 +132,10 @@ pub(crate) fn manifest_packages(package_json: &PackageJson) -> Vec<InstallPackag
                 InstallPackage::new(name.clone(), Some(spec.clone()), is_dev)
             })
         })
+        .filter(|package| !optional.iter().any(|(name, _)| *name == package.name))
+        .chain(optional.iter().map(|(name, spec)| {
+            InstallPackage::new(name.clone(), Some(spec.clone()), false).optional()
+        }))
         .collect();
     packages.sort_by(|a, b| a.name.cmp(&b.name));
     packages
