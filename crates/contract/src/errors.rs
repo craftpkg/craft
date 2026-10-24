@@ -74,4 +74,7 @@ pub enum TarballError {
 pub enum PackageError {
     #[error("no package.json found")]
     NoPackageJson,
+
+    #[error("package.json must contain a JSON object")]
+    NotAnObject,
 }
