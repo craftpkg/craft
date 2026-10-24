@@ -139,10 +139,10 @@ impl LinkerPipe {
 
             for (bin_name, bin_path) in package_bins(&artifact.name, manifest, &package_dir) {
                 if let Some(owner) = owners.get(&bin_name) {
-                    eprintln!(
-                        "warning: bin {bin_name} of {} conflicts with {owner}; keeping {owner}'s",
+                    self.context.reporter.warn(format!(
+                        "bin {bin_name} of {} conflicts with {owner}; keeping {owner}'s",
                         edge.name
-                    );
+                    ));
                     continue;
                 }
 
@@ -208,6 +208,9 @@ impl Pipeline<()> for LinkerPipe {
     async fn run(&self) -> Result<()> {
         let node_modules = self.context.node_modules_dir();
         fsutil::ensure_dir(&node_modules).await?;
+        self.context
+            .reporter
+            .status(format!("Linking {} packages", self.graph.nodes.len()));
         let nodes: Vec<(NodeId, ResolvedNode)> = self
             .graph
             .nodes
