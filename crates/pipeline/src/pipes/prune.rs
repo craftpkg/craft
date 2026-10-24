@@ -43,7 +43,7 @@ pub async fn prune_node_modules(
 
     let hoist_dir = virtual_store.join(HOIST_DIR);
     remove_dangling_links(&hoist_dir).await?;
-    remove_dangling_links(&node_modules.join(".bin")).await?;
+    remove_dangling_bins(&node_modules.join(".bin")).await?;
     remove_dangling_links(node_modules).await?;
     remove_empty_scopes(&hoist_dir).await?;
     remove_empty_scopes(node_modules).await
@@ -75,8 +75,7 @@ async fn reachable_entries(
 
 /// The virtual store entry a symlink points into, if any.
 async fn store_entry_of(link: &Path, virtual_store: &Path) -> Option<String> {
-    let target = fs::read_link(link).await.ok()?;
-    let resolved = fsutil::normalize_lexically(&link.parent()?.join(target));
+    let resolved = fsutil::read_link_resolved(link).await.ok()?;
     let inside = resolved.strip_prefix(virtual_store).ok()?;
     let entry = inside.components().next()?.as_os_str().to_string_lossy();
     let is_hoist_dir = entry == HOIST_DIR;
@@ -106,10 +105,23 @@ async fn package_entries(node_modules: &Path) -> io::Result<Vec<(String, PathBuf
 /// Removes symlinks whose target no longer exists, directly in `dir` and inside its `@scope`
 /// directories.
 async fn remove_dangling_links(dir: &Path) -> io::Result<()> {
-    for (_, path) in package_entries_including_bins(dir).await? {
+    for (_, path) in package_entries(dir).await? {
         let is_dangling = fs::symlink_metadata(&path).await?.is_symlink() && !path.exists();
         if is_dangling {
             fsutil::remove_entry(&path).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn remove_dangling_bins(bin_dir: &Path) -> io::Result<()> {
+    for name in fsutil::bin_names(bin_dir).await? {
+        let link = bin_dir.join(name);
+        let is_dangling = fsutil::bin_target(&link)
+            .await
+            .is_none_or(|target| !target.exists());
+        if is_dangling {
+            fsutil::remove_bin(&link).await?;
         }
     }
     Ok(())
@@ -124,15 +136,6 @@ async fn remove_empty_scopes(dir: &Path) -> io::Result<()> {
         }
     }
     Ok(())
-}
-
-/// Like [`package_entries`], but bin names may start with a dot.
-async fn package_entries_including_bins(dir: &Path) -> io::Result<Vec<(String, PathBuf)>> {
-    let is_bin_dir = dir.file_name().is_some_and(|name| name == ".bin");
-    if is_bin_dir {
-        return dir_entries(dir).await;
-    }
-    package_entries(dir).await
 }
 
 async fn dir_entries(dir: &Path) -> io::Result<Vec<(String, PathBuf)>> {
