@@ -258,3 +258,138 @@ fn craft_add_resolves_the_added_package_afresh() {
     let debug = project.require("debug").expect("debug loads");
     assert_eq!(debug["dependencies"]["ms"], "2.1.3");
 }
+
+#[test]
+fn frozen_install_needs_a_lockfile() {
+    let registry = MockRegistry::start();
+    publish_react_stack(&registry);
+    let project = Project::new(&registry, json!({ "dependencies": { "debug": "^4.0.0" } }));
+
+    project
+        .craft()
+        .args(["install", "--frozen-lockfile"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "craft.lock is missing; run `craft install` to create it",
+        ));
+
+    assert!(registry.requested_paths().is_empty());
+}
+
+#[test]
+fn frozen_install_lists_what_is_out_of_date() {
+    let registry = MockRegistry::start();
+    publish_react_stack(&registry);
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "debug": "^4.0.0", "react": "^19.0.0" } }),
+    );
+    project.craft().arg("install").assert().success();
+    project.write_file(
+        "package.json",
+        &json!({ "dependencies": { "debug": "^4.4.0", "ms": "^2.0.0" } }).to_string(),
+    );
+
+    project
+        .craft()
+        .args(["install", "--frozen-lockfile"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "craft.lock is out of date with package.json: debug (^4.4.0 in package.json, ^4.0.0 in craft.lock), ms (not in craft.lock), react (not in package.json)",
+        ));
+}
+
+#[test]
+fn frozen_install_uses_only_the_lockfile() {
+    let registry = MockRegistry::start();
+    publish_react_stack(&registry);
+    let package_json =
+        json!({ "dependencies": { "debug": "^4.0.0", "ui": "^1.0.0", "react": "^19.0.0" } });
+    let original = Project::new(&registry, package_json.clone());
+    original.craft().arg("install").assert().success();
+    let lock = original.read_file("craft.lock");
+    registry.publish(PackageFixture::new("ms", "2.1.4"));
+
+    let checkout = Project::new(&registry, package_json);
+    checkout.write_file("craft.lock", &lock);
+    let metadata_before = metadata_requests(&registry).len();
+    checkout
+        .craft()
+        .args(["install", "--frozen-lockfile"])
+        .assert()
+        .success();
+
+    assert_eq!(metadata_requests(&registry).len(), metadata_before);
+    assert_eq!(checkout.read_file("craft.lock"), lock);
+    assert_eq!(
+        checkout.require("debug").expect("debug loads")["dependencies"]["ms"],
+        "2.1.3"
+    );
+}
+
+#[test]
+fn frozen_install_fails_on_an_incomplete_lockfile() {
+    let registry = MockRegistry::start();
+    publish_react_stack(&registry);
+    let project = Project::new(&registry, json!({ "dependencies": { "debug": "^4.0.0" } }));
+    project.craft().arg("install").assert().success();
+    let mut lock = lockfile(&project);
+    lock["packages"]
+        .as_object_mut()
+        .expect("packages")
+        .remove("ms@2.1.3");
+    project.write_file(
+        "craft.lock",
+        &serde_json::to_string_pretty(&lock).expect("render lock"),
+    );
+    std::fs::remove_dir_all(project.path().join("node_modules")).expect("remove node_modules");
+    let metadata_before = metadata_requests(&registry).len();
+
+    project
+        .craft()
+        .args(["install", "--frozen-lockfile"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "ms@^2.1.3 is not in craft.lock; run `craft install` to update it",
+        ));
+
+    assert_eq!(metadata_requests(&registry).len(), metadata_before);
+}
+
+#[test]
+fn installs_are_frozen_in_ci() {
+    let registry = MockRegistry::start();
+    publish_react_stack(&registry);
+    let project = Project::new(&registry, json!({ "dependencies": { "debug": "^4.0.0" } }));
+
+    let mut command = assert_cmd::Command::from_std(project.craft_process());
+    command
+        .arg("install")
+        .env("CI", "true")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("craft.lock is missing"));
+
+    let mut command = assert_cmd::Command::from_std(project.craft_process());
+    command.arg("install").env("CI", "false").assert().success();
+}
+
+#[test]
+fn craft_ci_reinstalls_from_scratch() {
+    let registry = MockRegistry::start();
+    publish_react_stack(&registry);
+    let project = Project::new(&registry, json!({ "dependencies": { "debug": "^4.0.0" } }));
+    project.craft().arg("install").assert().success();
+    project.write_file("node_modules/stray/index.js", "module.exports = 1;");
+
+    project.craft().arg("ci").assert().success();
+
+    assert!(!project.path().join("node_modules/stray").exists());
+    assert_eq!(
+        project.require("debug").expect("debug loads")["dependencies"]["ms"],
+        "2.1.3"
+    );
+}
