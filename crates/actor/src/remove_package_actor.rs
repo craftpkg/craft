@@ -4,6 +4,8 @@ use contract::{Actor, Context, Result};
 use lockfile::Lockfile;
 use package::{DependencySection, ProjectManifest};
 use pipeline::prune_node_modules;
+
+use crate::lock_state::mark_installed;
 use tokio::fs;
 
 #[derive(Debug)]
@@ -78,7 +80,7 @@ impl RemovePackageActor {
             lockfile.remove_dependency(package_name);
         }
         lockfile.save(&self.context.cwd).await?;
-        Ok(())
+        mark_installed(&self.context, &lockfile).await
     }
 }
 
