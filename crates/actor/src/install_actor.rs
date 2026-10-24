@@ -128,7 +128,10 @@ mod tests {
         let result = actor.run().await;
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "no package.json found");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "no package.json found; run `craft init` to create one"
+        );
     }
 
     #[test]
