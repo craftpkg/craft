@@ -1201,6 +1201,7 @@ dependencies = [
  "futures",
  "package",
  "resolver",
+ "serde_json",
  "tarball",
  "tempfile",
  "tokio",
