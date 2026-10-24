@@ -13,30 +13,34 @@ impl Actor<()> for InstallActor {
 
     async fn run(&self) -> Result<()> {
         let package_json = PackageJson::from_file(&self.context.package_json_path()).await?;
+        let packages = manifest_packages(&package_json);
+        debug::trace!("Installing packages from package.json: {packages:?}");
 
-        // Collect all dependencies
-        let mut pkgs = Vec::new();
-
-        if let Some(deps) = package_json.dependencies {
-            for (name, version) in deps {
-                pkgs.push(InstallPackage::new(name, Some(version), false));
-            }
-        }
-
-        if let Some(dev_deps) = package_json.dev_dependencies {
-            for (name, version) in dev_deps {
-                pkgs.push(InstallPackage::new(name, Some(version), true));
-            }
-        }
-
-        debug::trace!("Installing packages from package.json: {pkgs:?}");
-
-        // Run install and link pipes
-        let graph = InstallPipe::new(&self.context, pkgs).run().await?;
+        let graph = InstallPipe::new(&self.context, packages).run().await?;
         LinkerPipe::new(&self.context, graph).run().await?;
 
         Ok(())
     }
+}
+
+/// Every dependency and dev dependency the manifest declares, sorted by name so installs are
+/// deterministic.
+pub(crate) fn manifest_packages(package_json: &PackageJson) -> Vec<InstallPackage> {
+    let sections = [
+        (&package_json.dependencies, false),
+        (&package_json.dev_dependencies, true),
+    ];
+    let mut packages: Vec<InstallPackage> = sections
+        .into_iter()
+        .filter_map(|(section, is_dev)| Some((section.as_ref()?, is_dev)))
+        .flat_map(|(section, is_dev)| {
+            section.iter().map(move |(name, spec)| {
+                InstallPackage::new(name.clone(), Some(spec.clone()), is_dev)
+            })
+        })
+        .collect();
+    packages.sort_by(|a, b| a.name.cmp(&b.name));
+    packages
 }
 
 #[cfg(test)]
