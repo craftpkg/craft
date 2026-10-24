@@ -37,22 +37,25 @@ pub fn lockfile_from_graph(
         .nodes
         .iter()
         .map(|(id, node)| {
-            let mut dependencies = BTreeMap::new();
-            let mut peer_dependencies = BTreeMap::new();
+            let mut package = LockedPackage::new(
+                &node.artifact.name,
+                &node.artifact.version,
+                locked_source(&node.artifact, project_dir),
+            );
             for edge in &node.dependencies {
                 let section = match edge.kind {
-                    DependencyKind::Peer => &mut peer_dependencies,
-                    _ => &mut dependencies,
+                    DependencyKind::Peer => &mut package.peer_dependencies,
+                    DependencyKind::Optional => &mut package.optional_dependencies,
+                    DependencyKind::Production | DependencyKind::Development => {
+                        &mut package.dependencies
+                    }
                 };
                 section.insert(edge.name.clone(), key(&edge.target));
             }
-            let package = LockedPackage {
-                name: node.artifact.name.clone(),
-                version: node.artifact.version.clone(),
-                resolution: locked_source(&node.artifact, project_dir),
-                dependencies,
-                peer_dependencies,
-            };
+            let platform = &node.artifact.platform;
+            package.os = platform.os.clone();
+            package.cpu = platform.cpu.clone();
+            package.libc = platform.libc.clone();
             (key(id), package)
         })
         .collect();
@@ -124,6 +127,7 @@ mod tests {
                 version: version.to_string(),
                 source,
                 integrity: None,
+                platform: Default::default(),
                 package: None,
             },
             dependencies,
