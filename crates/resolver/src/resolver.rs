@@ -155,8 +155,14 @@ impl Resolver {
 /// rename that publishes it never crosses filesystems.
 fn tarball_path(package_dir: &Path) -> PathBuf {
     let mut path = package_dir.as_os_str().to_os_string();
-    path.push(".tgz");
+    path.push(process_download_suffix());
     PathBuf::from(path)
+}
+
+/// Each process downloads under its own name, because installs sharing a store delete their
+/// tarball once extracted and would otherwise delete another process's download.
+pub(crate) fn process_download_suffix() -> String {
+    format!(".{}.tgz", std::process::id())
 }
 
 #[cfg(test)]
