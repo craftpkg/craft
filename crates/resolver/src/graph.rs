@@ -13,6 +13,17 @@ impl NodeId {
     pub fn new(name: &str, version: &str) -> Self {
         Self(format!("{name}@{version}"))
     }
+
+    /// The id of this package resolved with `peers`, as `<id>_<peer id>_<peer id>…` in peer-name
+    /// order; the plain id when there are none.
+    pub fn with_peers<'a>(&self, peers: impl IntoIterator<Item = &'a NodeId>) -> Self {
+        let mut id = self.0.clone();
+        for peer in peers {
+            id.push('_');
+            id.push_str(&peer.0);
+        }
+        Self(id)
+    }
 }
 
 impl Display for NodeId {
@@ -25,6 +36,7 @@ impl Display for NodeId {
 pub enum DependencyKind {
     Production,
     Development,
+    Peer,
 }
 
 /// A dependency as its dependent declared it, and the node it resolved to.
@@ -40,7 +52,19 @@ pub struct Edge {
 #[derive(Debug, Clone)]
 pub struct ResolvedNode {
     pub artifact: ResolvedArtifact,
+    /// Dependencies, plus `Peer` edges once peers are resolved.
     pub dependencies: Vec<Edge>,
+    pub peers: Vec<PeerDependency>,
+}
+
+/// A peer a package declares. `candidate` is what the peer range resolves to on its own, used
+/// when nothing above the package provides it; optional peers have none.
+#[derive(Debug, Clone)]
+pub struct PeerDependency {
+    pub name: String,
+    pub range: String,
+    pub optional: bool,
+    pub candidate: Option<NodeId>,
 }
 
 /// The full dependency tree of an install: the project's own dependencies (`roots`) and every
@@ -73,6 +97,17 @@ mod tests {
             NodeId::new("@types/node", "22.0.0").to_string(),
             "@types/node@22.0.0"
         );
+    }
+
+    #[test]
+    fn test_node_id_with_peers() {
+        let query = NodeId::new("@tanstack/react-query", "5.90.10");
+        let react = NodeId::new("react", "19.2.0");
+        assert_eq!(
+            query.with_peers([&react]).to_string(),
+            "@tanstack/react-query@5.90.10_react@19.2.0"
+        );
+        assert_eq!(query.with_peers([]), query);
     }
 
     #[test]
