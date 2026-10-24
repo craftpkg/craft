@@ -71,10 +71,29 @@ pub enum TarballError {
 }
 
 #[derive(Error, Debug)]
+pub enum ScriptError {
+    #[error("script \"{name}\" not found{}", available_scripts(.available))]
+    NotFound {
+        name: String,
+        available: Vec<String>,
+    },
+
+    #[error("{name} exited with code {code}")]
+    Failed { name: String, code: i32 },
+}
+
+#[derive(Error, Debug)]
 pub enum PackageError {
     #[error("no package.json found")]
     NoPackageJson,
 
     #[error("package.json must contain a JSON object")]
     NotAnObject,
+}
+
+fn available_scripts(available: &[String]) -> String {
+    if available.is_empty() {
+        return String::new();
+    }
+    format!("; available scripts: {}", available.join(", "))
 }
