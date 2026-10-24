@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 use contract::{Actor, Context, LockfileError, Pipeline, Result};
 use lockfile::Lockfile;
@@ -9,6 +10,7 @@ use crate::lock_state::{
     is_up_to_date, lock_differences, mark_installed, save_lockfile, with_lock_preference,
 };
 use crate::scripts::{run_install_scripts, script_policy};
+use crate::summary::{report_changes, report_installed};
 
 pub struct InstallActor {
     context: Context,
@@ -31,6 +33,7 @@ impl Actor<InstallOptions> for InstallActor {
     }
 
     async fn run(&self) -> Result<()> {
+        let started = Instant::now();
         if self.options.clean {
             fsutil::remove_entry(&self.context.node_modules_dir()).await?;
         }
@@ -42,7 +45,7 @@ impl Actor<InstallOptions> for InstallActor {
             ensure_lockfile_matches(lockfile.as_ref(), &package_json)?;
         }
         if is_up_to_date(&self.context, lockfile.as_ref(), &package_json, &policy).await {
-            println!("Already up to date");
+            self.context.reporter.line("Already up to date");
             return Ok(());
         }
 
@@ -60,13 +63,19 @@ impl Actor<InstallOptions> for InstallActor {
         LinkerPipe::new(&self.context, graph.clone()).run().await?;
         run_install_scripts(&self.context, graph.clone(), &package_json, &policy, true).await?;
 
-        match lockfile.filter(|_| is_frozen) {
-            Some(lockfile) => mark_installed(&self.context, &lockfile, &policy).await,
+        let installed_lockfile = match lockfile.as_ref().filter(|_| is_frozen) {
+            Some(lockfile) => {
+                mark_installed(&self.context, lockfile, &policy).await?;
+                lockfile.clone()
+            }
             None => {
                 let specifiers = manifest_specifiers(&package_json);
-                save_lockfile(&self.context, &graph, &specifiers, &policy).await
+                save_lockfile(&self.context, &graph, &specifiers, &policy).await?
             }
-        }
+        };
+        report_changes(&self.context, lockfile.as_ref(), &installed_lockfile);
+        report_installed(&self.context, &graph, started);
+        Ok(())
     }
 }
 
