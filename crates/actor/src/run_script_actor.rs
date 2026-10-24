@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use contract::{Actor, CRAFT_VERSION, Context, PackageError, Result, ScriptError};
+use contract::{
+    Actor, CRAFT_VERSION, Context, PackageError, Result, ScriptError, node_cpu, node_os,
+};
 use package::PackageJson;
 use process::Process;
 
@@ -185,17 +187,8 @@ fn quote(arg: &str) -> String {
 /// npm's format (`<manager>/<version> <platform> <arch>`), which tools read to detect the
 /// package manager that started them.
 fn user_agent() -> String {
-    let platform = match std::env::consts::OS {
-        "macos" => "darwin",
-        "windows" => "win32",
-        other => other,
-    };
-    let arch = match std::env::consts::ARCH {
-        "x86_64" => "x64",
-        "aarch64" => "arm64",
-        "x86" => "ia32",
-        other => other,
-    };
+    let platform = node_os(std::env::consts::OS);
+    let arch = node_cpu(std::env::consts::ARCH);
     format!("craft/{CRAFT_VERSION} {platform} {arch}")
 }
 
