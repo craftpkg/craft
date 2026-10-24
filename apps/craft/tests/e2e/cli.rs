@@ -179,3 +179,27 @@ fn silent_prints_nothing() {
 
     assert!(project.require("debug").is_ok());
 }
+
+#[test]
+fn lists_and_explains_installed_packages() {
+    let registry = MockRegistry::start();
+    publish_summary_packages(&registry);
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "debug": "^4.0.0" }, "devDependencies": { "react": "^19.0.0" } }),
+    );
+    project.craft().arg("install").assert().success();
+
+    project
+        .craft()
+        .args(["ls", "--depth", "1"])
+        .assert()
+        .success()
+        .stdout("dependencies:\ndebug 4.4.0\n└── ms 2.1.3\n\ndevDependencies:\nreact 19.2.0\n");
+    project
+        .craft()
+        .args(["why", "ms"])
+        .assert()
+        .success()
+        .stdout("ms 2.1.3\n  dependencies: debug 4.4.0 → ms 2.1.3\n");
+}
