@@ -180,13 +180,19 @@ fn copy_symlink(from: &Path, to: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, to)
 }
 
+/// Without Developer Mode Windows refuses file symlinks, so the file is copied instead;
+/// directory links become junctions, which need no privileges.
 #[cfg(windows)]
 fn copy_symlink(from: &Path, to: &Path) -> io::Result<()> {
     let target: PathBuf = fs::read_link(from)?;
     if from.is_dir() {
-        std::os::windows::fs::symlink_dir(target, to)
-    } else {
-        std::os::windows::fs::symlink_file(target, to)
+        let base = from.parent().unwrap_or(Path::new(""));
+        let absolute = std::path::absolute(crate::normalize_lexically(&base.join(target)))?;
+        return junction::create(absolute, to);
+    }
+    match std::os::windows::fs::symlink_file(&target, to) {
+        Ok(()) => Ok(()),
+        Err(_) => fs::copy(from, to).map(|_| ()),
     }
 }
 
