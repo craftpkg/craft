@@ -1,5 +1,6 @@
 use crate::sources::{
-    resolve_directory, resolve_link, resolve_local_tarball, resolve_path, resolve_remote_tarball,
+    resolve_directory, resolve_git, resolve_link, resolve_local_tarball, resolve_path,
+    resolve_remote_tarball,
 };
 use crate::{ArtifactSource, NpmResolver, ResolvedArtifact, download_artifact::DownloadArtifact};
 use anyhow::{Context as _, anyhow};
@@ -62,13 +63,14 @@ impl Resolver {
             DependencySpec::Tarball { url, .. } => {
                 resolve_remote_tarball(&self.context, &self.network, requested_name, url).await
             }
-            DependencySpec::Git { .. } | DependencySpec::Workspace { .. } => {
-                Err(SpecError::Unsupported {
-                    kind: spec.kind(),
-                    dependency: package.to_string(),
-                }
-                .into())
+            DependencySpec::Git { url, .. } => {
+                resolve_git(&self.context, &self.network, requested_name, url).await
             }
+            DependencySpec::Workspace { .. } => Err(SpecError::Unsupported {
+                kind: spec.kind(),
+                dependency: package.to_string(),
+            }
+            .into()),
         }
     }
 
@@ -163,23 +165,11 @@ mod tests {
     #[tokio::test]
     async fn test_unsupported_specs_are_reported() {
         let resolver = Resolver::new(&temp_context());
-        let cases = [
-            (
-                "repo",
-                Some("github:user/repo"),
-                "git dependencies are not supported yet: repo@github:user/repo",
-            ),
-            (
-                "lib",
-                Some("workspace:*"),
-                "workspace: dependencies are not supported yet: lib@workspace:*",
-            ),
-            (
-                "git+https://github.com/user/repo.git",
-                None,
-                "git dependencies are not supported yet: git+https://github.com/user/repo.git",
-            ),
-        ];
+        let cases = [(
+            "lib",
+            Some("workspace:*"),
+            "workspace: dependencies are not supported yet: lib@workspace:*",
+        )];
 
         for (name, spec, message) in cases {
             let pkg = InstallPackage::new(name.to_string(), spec.map(str::to_string), false);
