@@ -352,7 +352,6 @@ fn reports_a_missing_tarball_without_caching_the_error_body() {
 }
 
 #[test]
-#[ignore = "fixed by 1.7: tarball integrity is never verified"]
 fn rejects_tarballs_with_mismatched_integrity() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("ms", "2.1.3").wrong_integrity());
@@ -363,9 +362,29 @@ fn rejects_tarballs_with_mismatched_integrity() {
         .arg("install")
         .assert()
         .failure()
-        .stderr(contains("integrity"));
+        .stderr(contains("failed to download ms@2.1.3"))
+        .stderr(contains("tarball integrity mismatch: expected sha512-AAAA"));
 
+    let packages = project.craft_home().join("packages");
+    let cached_entries = std::fs::read_dir(&packages).map_or(0, |entries| entries.count());
+    assert_eq!(cached_entries, 0);
     assert!(!project.path().join("node_modules/ms").exists());
+}
+
+#[test]
+fn replaces_a_corrupted_cached_tarball() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    let first = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
+    first.craft().arg("install").assert().success();
+    let packages = first.craft_home().join("packages");
+    std::fs::write(packages.join("ms-2.1.3.tgz"), b"corrupted").expect("corrupt tarball");
+    std::fs::remove_dir_all(packages.join("ms-2.1.3")).expect("remove extracted package");
+    let second = first.sibling(json!({ "dependencies": { "ms": "^2.0.0" } }));
+
+    second.craft().arg("install").assert().success();
+
+    assert_eq!(second.required_version("ms"), Ok("2.1.3".to_string()));
 }
 
 #[test]
