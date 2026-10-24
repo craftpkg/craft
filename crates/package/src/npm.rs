@@ -11,11 +11,14 @@ pub struct PackageJson {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    #[serde(default, deserialize_with = "string_entries")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scripts: Option<HashMap<String, String>>,
+    #[serde(default, deserialize_with = "string_entries")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dependencies: Option<HashMap<String, String>>,
     #[serde(rename = "devDependencies")]
+    #[serde(default, deserialize_with = "string_entries")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dev_dependencies: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -162,6 +165,28 @@ pub struct NpmPackage {
     pub versions: HashMap<String, PackageJson>,
 }
 
+/// Published manifests are loosely typed: some old ones put objects among their scripts
+/// (`"blanket": { "pattern": … }`). Like npm, only the string entries count.
+fn string_entries<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<HashMap<String, String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let serde_json::Value::Object(entries) = value else {
+        return Ok(None);
+    };
+    let strings = entries
+        .into_iter()
+        .filter_map(|(key, value)| match value {
+            serde_json::Value::String(text) => Some((key, text)),
+            _ => None,
+        })
+        .collect();
+    Ok(Some(strings))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,6 +241,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(manifest.trusted_dependencies(), ["bcrypt", "esbuild"]);
+    }
+
+    #[test]
+    fn test_ignores_entries_that_are_not_strings() {
+        let manifest: PackageJson = serde_json::from_str(
+            r#"{
+                "scripts": { "test": "mocha", "blanket": { "pattern": ["/lib/"] } },
+                "dependencies": { "ms": "^2.0.0", "broken": {} },
+                "devDependencies": []
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            manifest.scripts,
+            Some(HashMap::from([("test".to_string(), "mocha".to_string())]))
+        );
+        assert_eq!(
+            manifest.dependencies,
+            Some(HashMap::from([("ms".to_string(), "^2.0.0".to_string())]))
+        );
+        assert_eq!(manifest.dev_dependencies, None);
     }
 
     #[test]
