@@ -5,7 +5,8 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use contract::{Context, Pipeline, Result};
 use futures::stream::{self, StreamExt};
-use package::{DependencySpec, InstallPackage};
+use lockfile::Lockfile;
+use package::{DependencySpec, InstallPackage, PackageJson};
 use resolver::{
     ArtifactSource, DependencyKind, Edge, NodeId, PeerDependency, ResolutionGraph,
     ResolvedArtifact, ResolvedNode, Resolver,
@@ -42,6 +43,14 @@ impl InstallPipe {
         }
     }
 
+    /// Resolves against `lockfile` first, so locked versions need no registry metadata.
+    pub fn with_lockfile(mut self, lockfile: Option<&Lockfile>) -> Self {
+        if let Some(lockfile) = lockfile {
+            self.resolver = self.resolver.with_lockfile(lockfile);
+        }
+        self
+    }
+
     #[async_recursion::async_recursion]
     async fn resolve_package(
         &self,
@@ -74,7 +83,8 @@ impl InstallPipe {
             return Ok(node_id);
         }
 
-        self.fetch(&artifact)
+        let artifact = self
+            .fetch(artifact)
             .await
             .with_context(|| failure_message(package, ancestry))?;
         let ancestry = [ancestry, std::slice::from_ref(&node_id)].concat();
@@ -147,24 +157,28 @@ impl InstallPipe {
             .await
     }
 
-    /// Downloads and extracts a registry package; other sources are materialized while
-    /// resolving.
-    async fn fetch(&self, artifact: &ResolvedArtifact) -> Result<()> {
+    /// Downloads and extracts a registry package into the store; other sources are
+    /// materialized while resolving. A package resolved from craft.lock arrives without its
+    /// manifest, which is then read from the extracted package.
+    async fn fetch(&self, mut artifact: ResolvedArtifact) -> Result<ResolvedArtifact> {
         let is_registry_package = matches!(artifact.source, ArtifactSource::Registry { .. });
         if !is_registry_package {
-            return Ok(());
+            return Ok(artifact);
         }
 
         let package_dir = artifact.package_dir(&self.context);
-        if package_dir.exists() {
-            debug::info!("Package {} already unzipped", artifact.name);
-            return Ok(());
+        if !package_dir.exists() {
+            let download_artifact = self.resolver.download(&artifact).await?;
+            let extracted = unzip(download_artifact.path.clone(), package_dir.clone()).await;
+            let _ = tokio::fs::remove_file(&download_artifact.path).await;
+            extracted?;
         }
 
-        let download_artifact = self.resolver.download(artifact).await?;
-        let extracted = unzip(download_artifact.path.clone(), package_dir).await;
-        let _ = tokio::fs::remove_file(&download_artifact.path).await;
-        extracted
+        if artifact.package.is_none() {
+            artifact.package =
+                Some(PackageJson::from_file(&package_dir.join("package.json")).await?);
+        }
+        Ok(artifact)
     }
 
     async fn resolve_dependencies(
