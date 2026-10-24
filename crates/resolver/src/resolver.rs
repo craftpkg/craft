@@ -18,9 +18,9 @@ pub struct Resolver {
 }
 
 impl Resolver {
-    pub fn new(cache_dir: PathBuf) -> Self {
+    pub fn new(cache_dir: PathBuf, registry: String) -> Self {
         Self {
-            npm_resolver: NpmResolver::new(),
+            npm_resolver: NpmResolver::new(registry),
             git_resolver: GitResolver::new(),
             network: Network::new(),
             cache_dir,
@@ -99,12 +99,13 @@ impl Resolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use contract::DEFAULT_REGISTRY;
 
     #[tokio::test]
     #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_npm_package() {
         let pkg = InstallPackage::new("react".to_string(), Some("17.0.2".to_string()), false);
-        let resolver = Resolver::new(std::env::temp_dir());
+        let resolver = Resolver::new(std::env::temp_dir(), DEFAULT_REGISTRY.to_string());
         let result = resolver.resolve(&pkg).await;
 
         assert!(result.is_ok());
@@ -116,7 +117,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_git_package() {
         let pkg = InstallPackage::new("git:github.com/user/repo.git".to_string(), None, false);
-        let resolver = Resolver::new(std::env::temp_dir());
+        let resolver = Resolver::new(std::env::temp_dir(), DEFAULT_REGISTRY.to_string());
         let result = resolver.resolve(&pkg).await;
 
         assert!(result.is_ok());
@@ -129,7 +130,7 @@ mod tests {
     #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_npm_latest() {
         let pkg = InstallPackage::new("express".to_string(), None, false);
-        let resolver = Resolver::new(std::env::temp_dir());
+        let resolver = Resolver::new(std::env::temp_dir(), DEFAULT_REGISTRY.to_string());
         let result = resolver.resolve(&pkg).await;
 
         assert!(result.is_ok());
@@ -141,7 +142,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_gitlab_package() {
         let pkg = InstallPackage::new("git:gitlab.com/package/psc".to_string(), None, false);
-        let resolver = Resolver::new(std::env::temp_dir());
+        let resolver = Resolver::new(std::env::temp_dir(), DEFAULT_REGISTRY.to_string());
         let result = resolver.resolve(&pkg).await;
 
         assert!(result.is_ok());
