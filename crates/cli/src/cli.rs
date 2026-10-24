@@ -83,6 +83,15 @@ pub enum Commands {
         #[arg(long)]
         ignore_scripts: bool,
     },
+    /// List the project's dependencies, and theirs with --depth.
+    #[command(visible_alias = "ls")]
+    List {
+        /// How many levels of dependencies to show below the project's own.
+        #[arg(long, default_value_t = 0)]
+        depth: usize,
+    },
+    /// Show every chain of dependencies that installs a package.
+    Why { package: String },
     /// Remove node_modules and install exactly what craft.lock records.
     Ci {
         /// Run no lifecycle scripts.
@@ -142,6 +151,12 @@ pub enum Action {
         command: CacheCommands,
     },
     Init,
+    List {
+        depth: usize,
+    },
+    Why {
+        package: String,
+    },
     Install {
         frozen_lockfile: bool,
         ignore_scripts: bool,
@@ -179,6 +194,10 @@ impl Cli {
                 command: command.clone(),
             },
             Commands::Init => Action::Init,
+            Commands::List { depth } => Action::List { depth: *depth },
+            Commands::Why { package } => Action::Why {
+                package: package.clone(),
+            },
             Commands::Start => run_script("start", &[]),
             Commands::Test => run_script("test", &[]),
             Commands::Install {
