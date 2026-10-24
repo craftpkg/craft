@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 
 use contract::{Context, Pipeline, Result};
 use futures::stream::{self, StreamExt};
-use package::PackageBin;
 use resolver::{Edge, ResolutionGraph, ResolvedArtifact, ResolvedNode};
+
+use super::bins::package_bins;
 use tokio::fs;
 
 const LINK_CONCURRENCY: usize = 10;
@@ -39,61 +40,49 @@ impl LinkerPipe {
         for edge in &node.dependencies {
             self.link_edge(edge, &node_modules).await?;
         }
-        Ok(())
+        self.link_bins(&node.dependencies, &node_modules).await
     }
 
-    /// Links `node_modules/<edge.name>` to the package the edge resolved to, plus its bins.
+    /// Links `node_modules/<edge.name>` to the package the edge resolved to.
     async fn link_edge(&self, edge: &Edge, node_modules: &Path) -> Result<()> {
         let target = self.graph.target(edge)?;
         let source_dir = self.package_dir(&target.artifact);
         let dest_path = node_modules.join(&edge.name);
         fsutil::force_symlink_dir(&source_dir, &dest_path).await?;
         debug::info!("Linked {} -> {:?}", edge.name, source_dir);
-
-        self.link_package_binaries(&edge.name, &target.artifact, node_modules)
-            .await
+        Ok(())
     }
 
-    /// Helper to link binaries for a package into a node_modules directory
-    async fn link_package_binaries(
-        &self,
-        link_name: &str,
-        artifact: &ResolvedArtifact,
-        node_modules_dir: &Path,
-    ) -> Result<()> {
-        let Some(pkg_json) = &artifact.package else {
-            return Ok(());
-        };
-        if let Some(bin) = &pkg_json.bin {
-            let bin_dir = node_modules_dir.join(".bin");
-            fsutil::ensure_dir(&bin_dir).await?;
+    /// Links the bins of `edges` into `node_modules/.bin`, one package at a time in name order,
+    /// so when two packages declare the same bin the first keeps it on every install.
+    async fn link_bins(&self, edges: &[Edge], node_modules: &Path) -> Result<()> {
+        let mut edges: Vec<&Edge> = edges.iter().collect();
+        edges.sort_by(|a, b| a.name.cmp(&b.name));
+        let bin_dir = node_modules.join(".bin");
+        let mut owners: HashMap<String, &str> = HashMap::new();
 
-            let bins = match bin {
-                PackageBin::String(path) => {
-                    let mut map = HashMap::new();
-                    map.insert(artifact.name.clone(), path.clone());
-                    map
-                }
-                PackageBin::Map(map) => map.clone(),
+        for edge in edges {
+            let artifact = &self.graph.target(edge)?.artifact;
+            let Some(manifest) = &artifact.package else {
+                continue;
             };
+            let package_dir = node_modules.join(&edge.name);
 
-            for (bin_name, bin_path) in bins {
-                let target_path = bin_dir.join(&bin_name);
-                let source_path = node_modules_dir.join(link_name).join(&bin_path);
-                let relative_source = fsutil::relative_target(&target_path, &source_path);
-                fsutil::force_symlink_file(&relative_source, &target_path).await?;
-
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    if let Ok(metadata) = fs::metadata(&source_path).await {
-                        let mut perms = metadata.permissions();
-                        perms.set_mode(0o755);
-                        let _ = fs::set_permissions(&source_path, perms).await;
-                    }
+            for (bin_name, bin_path) in package_bins(&artifact.name, manifest, &package_dir) {
+                if let Some(owner) = owners.get(&bin_name) {
+                    eprintln!(
+                        "warning: bin {bin_name} of {} conflicts with {owner}; keeping {owner}'s",
+                        edge.name
+                    );
+                    continue;
                 }
 
-                debug::info!("Linked bin {} -> {:?}", bin_name, source_path);
+                let link = bin_dir.join(&bin_name);
+                let source = package_dir.join(&bin_path);
+                fsutil::force_symlink_file(&fsutil::relative_target(&link, &source), &link).await?;
+                make_executable(&source).await;
+                debug::info!("Linked bin {} -> {:?}", bin_name, source);
+                owners.insert(bin_name, &edge.name);
             }
         }
         Ok(())
@@ -130,9 +119,23 @@ impl Pipeline<()> for LinkerPipe {
             result?;
         }
 
-        Ok(())
+        self.link_bins(&self.graph.roots, node_modules).await
     }
 }
+
+/// Adds execute permission for everyone, keeping the file's other mode bits.
+#[cfg(unix)]
+async fn make_executable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    if let Ok(metadata) = fs::metadata(path).await {
+        let mode = metadata.permissions().mode() | 0o111;
+        let _ = fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).await;
+    }
+}
+
+#[cfg(not(unix))]
+async fn make_executable(_path: &Path) {}
 
 #[cfg(test)]
 mod tests {
