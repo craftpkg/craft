@@ -1,3 +1,4 @@
+use predicates::prelude::*;
 use predicates::str::contains;
 use serde_json::json;
 use testkit::{MockRegistry, PackageFixture};
@@ -74,16 +75,106 @@ fn fails_when_the_script_fails() {
 }
 
 #[test]
-#[ignore = "fixed by 1.12: craft exits 1 instead of the script's exit code"]
 fn exits_with_the_script_exit_code() {
     let registry = MockRegistry::start();
     let project = Project::new(&registry, json!({ "scripts": { "fail": "exit 3" } }));
 
-    project.craft().args(["run", "fail"]).assert().code(3);
+    project
+        .craft()
+        .args(["run", "fail"])
+        .assert()
+        .code(3)
+        .stderr("error: fail exited with code 3\n");
 }
 
 #[test]
-#[ignore = "fixed by 1.12: node_modules/.bin is not on PATH for scripts"]
+fn passes_arguments_only_to_the_main_script() {
+    let registry = MockRegistry::start();
+    let project = Project::new(
+        &registry,
+        json!({ "scripts": { "pretest": "echo pre", "test": "echo test", "posttest": "echo post" } }),
+    );
+
+    project
+        .craft()
+        .args(["run", "test", "--watch"])
+        .assert()
+        .success()
+        .stdout("pre\ntest --watch\npost\n");
+}
+
+#[test]
+fn stops_at_a_failing_pre_script() {
+    let registry = MockRegistry::start();
+    let project = Project::new(
+        &registry,
+        json!({ "scripts": { "prebuild": "exit 4", "build": "echo build" } }),
+    );
+
+    project
+        .craft()
+        .args(["run", "build"])
+        .assert()
+        .code(4)
+        .stdout("");
+}
+
+#[test]
+fn reports_a_missing_script_with_the_available_ones() {
+    let registry = MockRegistry::start();
+    let project = Project::new(
+        &registry,
+        json!({ "scripts": { "test": "echo test", "build": "echo build" } }),
+    );
+
+    project
+        .craft()
+        .args(["run", "deploy"])
+        .assert()
+        .failure()
+        .stderr(contains(
+            "script \"deploy\" not found; available scripts: build, test",
+        ));
+}
+
+#[test]
+fn sets_npm_environment_variables() {
+    let registry = MockRegistry::start();
+    let project = Project::new(
+        &registry,
+        json!({
+            "name": "app",
+            "version": "1.2.3",
+            "scripts": { "env": "echo $npm_lifecycle_event $npm_package_name $npm_package_version $npm_config_user_agent" },
+        }),
+    );
+
+    project
+        .craft()
+        .args(["run", "env"])
+        .assert()
+        .success()
+        .stdout(contains("env app 1.2.3 craft/"));
+}
+
+#[test]
+fn runs_dependency_bins_directly() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("cowsay", "1.6.0").bin("cowsay", "cli.js"));
+    let project = Project::new(&registry, json!({ "dependencies": { "cowsay": "^1.0.0" } }));
+    project.craft().arg("install").assert().success();
+    std::fs::remove_file(project.path().join("package.json")).expect("remove package.json");
+
+    project
+        .craft()
+        .args(["cowsay", "a; echo INJECTED"])
+        .assert()
+        .success()
+        .stdout(contains("cowsay cowsay@1.6.0"))
+        .stdout(contains("INJECTED\n").not());
+}
+
+#[test]
 fn scripts_can_call_dependency_bins() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("cowsay", "1.6.0").bin("cowsay", "cli.js"));
@@ -102,7 +193,6 @@ fn scripts_can_call_dependency_bins() {
 }
 
 #[test]
-#[ignore = "fixed by 1.12: pre and post scripts are not run"]
 fn runs_pre_and_post_scripts_in_order() {
     let registry = MockRegistry::start();
     let project = Project::new(
@@ -119,7 +209,6 @@ fn runs_pre_and_post_scripts_in_order() {
 }
 
 #[test]
-#[ignore = "fixed by 1.12: arguments are joined into the shell command unquoted"]
 fn passes_arguments_verbatim() {
     let registry = MockRegistry::start();
     let project = Project::new(&registry, json!({ "scripts": { "show": "echo" } }));
