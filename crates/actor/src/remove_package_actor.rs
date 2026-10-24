@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use contract::{Actor, Context, Result};
+use lockfile::Lockfile;
 use package::{DependencySection, ProjectManifest};
 use pipeline::prune_node_modules;
 use tokio::fs;
@@ -63,7 +64,20 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
             manifest.save().await?;
             debug::info!("Updated package.json");
         }
+        self.remove_from_lockfile().await
+    }
+}
 
+impl RemovePackageActor {
+    /// Drops the packages and whatever only they needed from `craft.lock`, without resolving.
+    async fn remove_from_lockfile(&self) -> Result<()> {
+        let Some(mut lockfile) = Lockfile::load(&self.context.cwd).await? else {
+            return Ok(());
+        };
+        for package_name in &self.payload.packages {
+            lockfile.remove_dependency(package_name);
+        }
+        lockfile.save(&self.context.cwd).await?;
         Ok(())
     }
 }
