@@ -82,6 +82,14 @@ pub enum Commands {
         /// Run no lifecycle scripts.
         #[arg(long)]
         ignore_scripts: bool,
+        /// Leave devDependencies out.
+        #[arg(long, visible_alias = "prod")]
+        production: bool,
+    },
+    /// Allow packages to run install scripts, then install.
+    Trust {
+        #[arg(required = true)]
+        packages: Vec<String>,
     },
     /// List the project's dependencies, and theirs with --depth.
     #[command(visible_alias = "ls")]
@@ -111,6 +119,12 @@ pub struct SaveFlags {
     /// Save the exact resolved version instead of a caret range.
     #[arg(short = 'E', long)]
     pub exact: bool,
+    /// Save to optionalDependencies.
+    #[arg(short = 'O', long = "save-optional", conflicts_with_all = ["dev", "peer"])]
+    pub optional: bool,
+    /// Save to peerDependencies, and to devDependencies so it is installed for development.
+    #[arg(short = 'P', long = "save-peer", conflicts_with = "dev")]
+    pub peer: bool,
 }
 
 #[derive(Subcommand, Debug, PartialEq, Clone)]
@@ -137,6 +151,8 @@ pub enum Action {
         packages: Vec<String>,
         dev: bool,
         exact: bool,
+        optional: bool,
+        peer: bool,
         ignore_scripts: bool,
     },
     Remove {
@@ -160,9 +176,13 @@ pub enum Action {
     Install {
         frozen_lockfile: bool,
         ignore_scripts: bool,
+        production: bool,
     },
     Ci {
         ignore_scripts: bool,
+    },
+    Trust {
+        packages: Vec<String>,
     },
 }
 
@@ -209,10 +229,15 @@ impl Cli {
             Commands::Install {
                 frozen_lockfile,
                 ignore_scripts,
+                production,
                 ..
             } => Action::Install {
                 frozen_lockfile: *frozen_lockfile,
                 ignore_scripts: *ignore_scripts,
+                production: *production,
+            },
+            Commands::Trust { packages } => Action::Trust {
+                packages: packages.clone(),
             },
             Commands::Ci { ignore_scripts } => Action::Ci {
                 ignore_scripts: *ignore_scripts,
@@ -230,6 +255,8 @@ fn add(packages: &[String], save: &SaveFlags, ignore_scripts: bool) -> Action {
         packages: packages.to_vec(),
         dev: save.dev,
         exact: save.exact,
+        optional: save.optional,
+        peer: save.peer,
         ignore_scripts,
     }
 }
@@ -238,6 +265,7 @@ fn default_install() -> Action {
     Action::Install {
         frozen_lockfile: false,
         ignore_scripts: false,
+        production: false,
     }
 }
 
@@ -273,6 +301,8 @@ mod tests {
                 packages: vec!["ms".to_string()],
                 dev: false,
                 exact: true,
+                optional: false,
+                peer: false,
                 ignore_scripts: false,
             }
         );
@@ -339,6 +369,7 @@ mod tests {
             Action::Install {
                 frozen_lockfile: false,
                 ignore_scripts: false,
+                production: false,
             }
         );
     }
@@ -411,6 +442,7 @@ mod tests {
             Action::Install {
                 frozen_lockfile: true,
                 ignore_scripts: false,
+                production: false,
             }
         );
         assert_eq!(
@@ -433,6 +465,7 @@ mod tests {
             Action::Install {
                 frozen_lockfile: false,
                 ignore_scripts: false,
+                production: false,
             }
         );
     }
