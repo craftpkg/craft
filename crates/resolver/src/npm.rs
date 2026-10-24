@@ -1,4 +1,4 @@
-use crate::ResolvedArtifact;
+use crate::{ArtifactSource, ResolvedArtifact};
 use anyhow::Result;
 use contract::{NetworkError, RegistryError};
 use network::{Integrity, Network};
@@ -47,7 +47,9 @@ impl NpmResolver {
         let resolved = ResolvedArtifact {
             name: pkg_json.name.clone().unwrap_or_else(|| name.to_string()),
             version: pkg_json.version.clone().unwrap_or_else(|| version.clone()),
-            download_url: dist.tarball.clone(),
+            source: ArtifactSource::Registry {
+                tarball_url: dist.tarball.clone(),
+            },
             integrity: Integrity::from_dist(dist.integrity.as_deref(), dist.shasum.as_deref())?,
             package: Some(pkg_json.clone()),
         };
@@ -177,11 +179,10 @@ mod tests {
             .expect("Failed to resolve react package");
         assert_eq!(artifact.name, "react");
         assert!(!artifact.version.is_empty());
-        assert!(
-            artifact
-                .download_url
-                .starts_with("https://registry.npmjs.org/react/-/react-")
-        );
+        let ArtifactSource::Registry { tarball_url } = &artifact.source else {
+            panic!("react resolves from the registry");
+        };
+        assert!(tarball_url.starts_with("https://registry.npmjs.org/react/-/react-"));
     }
 
     #[tokio::test]
@@ -195,8 +196,10 @@ mod tests {
         assert_eq!(artifact.name, "react");
         assert_eq!(artifact.version, "17.0.2");
         assert_eq!(
-            artifact.download_url,
-            "https://registry.npmjs.org/react/-/react-17.0.2.tgz"
+            artifact.source,
+            ArtifactSource::Registry {
+                tarball_url: "https://registry.npmjs.org/react/-/react-17.0.2.tgz".to_string()
+            }
         );
     }
 
