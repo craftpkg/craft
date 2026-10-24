@@ -38,7 +38,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 0.3 | Mock registry + end-to-end test harness | P2 | [x] |
 | 0.4 | Lint/CI hygiene (`clippy --all-targets`, fmt, workspace lints, dead code) | P2 | [x] |
 | **Phase 1 — Correctness fixes (current layout)** | | | |
-| 1.1 | Dependency spec classification — no more panics | P0 | [ ] |
+| 1.1 | Dependency spec classification — no more panics | P0 | [x] |
 | 1.2 | `InstallPipe` returns a resolution graph, not a flat list | P0 | [ ] |
 | 1.3 | npm alias linking (root + transitive) | P0 | [ ] |
 | 1.4 | Tarball root-directory stripping | P0 | [ ] |
@@ -167,7 +167,9 @@ dangling symlink in `node_modules`, failing script exit code, scoped package wit
 Targeted fixes that don't need the store redesign. Some code (linker) will be rewritten in Phase 2;
 keep fixes there minimal and put the logic in reusable helpers so it carries over.
 
-### 1.1 Dependency spec classification — no more panics · P0 ✅
+### 1.1 Dependency spec classification — no more panics · P0 ✅ — ✔ done
+
+> Done: `package::DependencySpec` (`Registry`/`Alias`/`Git`/`Tarball`/`File`/`Link`/`Workspace`) with `VersionRequirement` (`Exact`/`Range`/`Tag`) parses every `package.json` spec and `craft add` literal; `""`/`*` mean any version, invalid specs and unsupported kinds return `SpecError` instead of panicking. `select_version` follows npm: a tag's version, else `latest` when it satisfies the range, else the highest satisfying stable version. `from_literal` splits at the first `@` after a scope (aliases like `sw@npm:string-width@^4` now parse) and keeps git URLs/paths whole. The broken `GitResolver` and `InstallPackage::is_git` were removed. Root packages are now linked to the exact artifact they resolved to (see 1.2). `clippy::expect_used` is denied outside tests; `testkit` and the e2e crate allow it. 4 known-bug e2e tests now pass.
 
 **Problem** — `crates/resolver/src/npm.rs:38` does `Range::parse(req_version).expect(..)`. Any spec that isn't a semver range panics (exit 101):
 
@@ -210,6 +212,8 @@ pub enum DependencySpec {
 ### 1.2 `InstallPipe` returns a resolution graph · P0 📖
 
 **Problem** — `InstallPipe::run` returns a deduplicated `Vec<ResolvedArtifact>` (`install_pipe.rs:149-165`). The linker then **re-guesses** which artifact each dependency edge meant by name + "highest satisfying version" (`linker_pipe.rs:46-64`, `125-148`). Every alias, multi-version and "which version did the root resolve to" bug comes from this lost information.
+
+> Partly done in 1.1: `InstallPipe` returns an `Installation { artifacts, roots }`, where each `ResolvedRoot` pairs a requested package with the artifact it resolved to, and the linker links roots from that instead of re-matching versions. Transitive edges are still re-guessed by name + highest satisfying version in `hydrate_artifact`.
 
 **Fix**
 - Return a graph:
@@ -319,15 +323,16 @@ Use relative symlink targets where possible (relocatable `node_modules`). Use it
 
 ### 1.9 `craft add` fixes · P1 ✅
 
+> Partly done in 1.1: `craft add` saves the version each requested package resolved to (from `Installation.roots`), so `craft add react@18` saves `^18.3.1` and aliases save `npm:<target>@^<version>`; the arbitrary-`find` bug is gone.
+
 **Problems** (`crates/actor/src/add_package_actor.rs`)
-- `craft add react@18` installs but **does not update `package.json`**: line 42 compares `a.name == pkg_name` where `pkg_name` is the raw literal `react@18`.
-- When several versions of a name are resolved, `find` picks an arbitrary one (wrong version saved).
+- ~~`craft add react@18` installs but does not update `package.json`~~ (fixed in 1.1).
+- ~~When several versions of a name are resolved, `find` picks an arbitrary one~~ (fixed in 1.1).
 - `package.json` is read **after** installing (line 37); with no `package.json`, all work is done then it fails.
 - Only the added packages are installed/linked — existing deps aren't verified, and once the lockfile exists it must be updated too.
 
 **Fix**
 - Read `package.json` first; error early if missing (suggest `craft init`, 6.3).
-- Parse each literal with 1.1; take the resolved version from the root edge in the graph (1.2).
 - Save rules (match npm): tag or range spec → `^<resolved>`; exact version spec → `^<resolved>` unless `-E/--exact`; alias → `npm:<target>@^<resolved>`; git/file → the original spec.
 - If the package already exists in the other section (`dependencies` vs `devDependencies`), move it.
 - After Phase 3: run a full install (all deps) so the lockfile stays consistent.
