@@ -11,8 +11,12 @@ pub struct Cli {
     pub command: Option<Commands>,
 
     /// Print what craft is doing.
-    #[arg(short, long, global = true)]
+    #[arg(short, long, global = true, conflicts_with = "silent")]
     pub verbose: bool,
+
+    /// Print nothing but warnings and errors.
+    #[arg(short, long, global = true)]
+    pub silent: bool,
 
     /// Use only cached registry metadata and stored packages; never touch the network.
     #[arg(long, global = true, conflicts_with = "prefer_offline")]
