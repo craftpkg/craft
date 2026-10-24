@@ -73,7 +73,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 5.3 | Global concurrency limits | P2 | [x] |
 | 5.4 | Timeouts, retries, User-Agent | P2 | [x] |
 | 5.5 | Streaming downloads (hash while writing) | P2 | [x] |
-| 5.6 | Metadata disk cache (ETag / 304) | P2 | [ ] |
+| 5.6 | Metadata disk cache (ETag / 304) | P2 | [x] |
 | 5.7 | Registry configuration (`.npmrc`, scopes, auth) | P1 | [x] |
 | **Phase 6 — CLI & UX** | | | |
 | 6.1 | Progress output and install summary | P2 | [ ] |
@@ -664,7 +664,9 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 
 - `response.bytes()` buffers whole tarballs in memory (`network.rs:30`). Stream chunks to the temp file while updating the integrity hasher (1.7); or stream straight into `GzDecoder` + `tar` and extract without writing the `.tgz`.
 
-### 5.6 Metadata disk cache · P2
+### 5.6 Metadata disk cache · P2 — ✔ done
+
+> Done: packuments are cached under `~/.craft/cache/metadata/<registry hash>/<name>.json` with a `.meta.json` holding `ETag`, `Last-Modified`, `max-age` and when they were fetched. Online, a cached packument within its `max-age` is used as is; otherwise it is revalidated with `If-None-Match` / `If-Modified-Since` and a `304` reuses it. `--prefer-offline` (or `prefer-offline=true`) uses any cached copy without asking; `--offline` (or `offline=true`) never touches the network and reports `<url> is not cached and craft is offline`, tarballs included. `craft cache clean` removes the cache. Measured on the Vite/React project without a lockfile: 6.6 s with a cold cache, 0.8 s warm (the npm registry sends `max-age=300`), 0.8 s `--offline`. Follow-up: the cache stores uncompressed JSON (138 MB for that project); compress or abbreviate it.
 
 - Cache packuments under `~/.craft/cache/metadata/` with `ETag`/`Last-Modified`; revalidate with `If-None-Match` (304). `--prefer-offline` / `--offline` flags.
 
