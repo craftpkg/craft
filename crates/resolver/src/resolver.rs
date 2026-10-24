@@ -52,7 +52,7 @@ impl Resolver {
                 if path.is_file() {
                     resolve_local_tarball(&self.context, requested_name, path).await
                 } else {
-                    resolve_directory(&self.context, requested_name, path).await
+                    resolve_directory(requested_name, path).await
                 }
             }
             DependencySpec::Link { path, .. } => {
