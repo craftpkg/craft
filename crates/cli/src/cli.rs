@@ -26,6 +26,9 @@ pub enum Commands {
         packages: Vec<String>,
         #[arg(short = 'D', long)]
         dev: bool,
+        /// Save the exact resolved version instead of a caret range.
+        #[arg(short = 'E', long)]
+        exact: bool,
     },
     Remove {
         #[arg(required = true)]
@@ -65,10 +68,21 @@ impl Display for Commands {
 /// and no command becomes `Install`.
 #[derive(Debug, PartialEq)]
 pub enum Action {
-    Add { packages: Vec<String>, dev: bool },
-    Remove { packages: Vec<String> },
-    Run { script: String, args: Vec<String> },
-    Cache { command: CacheCommands },
+    Add {
+        packages: Vec<String>,
+        dev: bool,
+        exact: bool,
+    },
+    Remove {
+        packages: Vec<String>,
+    },
+    Run {
+        script: String,
+        args: Vec<String>,
+    },
+    Cache {
+        command: CacheCommands,
+    },
     Install,
 }
 
@@ -83,9 +97,14 @@ impl Cli {
         };
 
         match command {
-            Commands::Add { packages, dev } => Action::Add {
+            Commands::Add {
+                packages,
+                dev,
+                exact,
+            } => Action::Add {
                 packages: packages.clone(),
                 dev: *dev,
+                exact: *exact,
             },
             Commands::Remove { packages } => Action::Remove {
                 packages: packages.clone(),
@@ -123,7 +142,7 @@ mod tests {
     fn test_add_packages() {
         let cli = Cli::parse_from(["craft", "add", "react", "express"]);
         match cli.command {
-            Some(Commands::Add { packages, dev }) => {
+            Some(Commands::Add { packages, dev, .. }) => {
                 assert_eq!(packages, vec!["react", "express"]);
                 assert!(!dev);
             }
@@ -132,10 +151,23 @@ mod tests {
     }
 
     #[test]
+    fn test_add_exact() {
+        let cli = Cli::parse_from(["craft", "add", "-E", "ms"]);
+        assert_eq!(
+            cli.normalize(),
+            Action::Add {
+                packages: vec!["ms".to_string()],
+                dev: false,
+                exact: true,
+            }
+        );
+    }
+
+    #[test]
     fn test_add_dev_dependency() {
         let cli = Cli::parse_from(["craft", "add", "typescript", "-D"]);
         match cli.command {
-            Some(Commands::Add { packages, dev }) => {
+            Some(Commands::Add { packages, dev, .. }) => {
                 assert_eq!(packages, vec!["typescript"]);
                 assert!(dev);
             }
