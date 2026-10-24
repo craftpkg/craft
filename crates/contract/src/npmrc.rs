@@ -7,6 +7,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use crate::constants::DEFAULT_REGISTRY;
 
 const DEFAULT_FETCH_RETRIES: u32 = 2;
+const DEFAULT_NETWORK_CONCURRENCY: usize = 16;
 
 /// Registry settings from `.npmrc` files and the environment: where each package is fetched
 /// from, which credentials go to which host, and how to reach the network.
@@ -24,6 +25,9 @@ pub struct RegistryConfig {
     pub cafile: Option<PathBuf>,
     /// How many times a failed request is retried (`fetch-retries`, 2 by default as in npm).
     pub fetch_retries: u32,
+    /// How many requests each client keeps in flight (`network-concurrency`, 16 by default as
+    /// in pnpm).
+    pub network_concurrency: usize,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -65,6 +69,7 @@ impl Default for RegistryConfig {
             strict_ssl: true,
             cafile: None,
             fetch_retries: DEFAULT_FETCH_RETRIES,
+            network_concurrency: DEFAULT_NETWORK_CONCURRENCY,
         }
     }
 }
@@ -194,6 +199,11 @@ impl RegistryConfig {
             "fetch-retries" => {
                 if let Ok(retries) = value.parse() {
                     self.fetch_retries = retries;
+                }
+            }
+            "network-concurrency" => {
+                if let Ok(concurrency) = value.parse::<usize>() {
+                    self.network_concurrency = concurrency.max(1);
                 }
             }
             _ => {}
@@ -364,6 +374,11 @@ mod tests {
         assert_eq!(
             super::tests::config("fetch-retries=5\n", &[]).fetch_retries,
             5
+        );
+        assert_eq!(config.network_concurrency, DEFAULT_NETWORK_CONCURRENCY);
+        assert_eq!(
+            super::tests::config("network-concurrency=0\n", &[]).network_concurrency,
+            1
         );
     }
 
