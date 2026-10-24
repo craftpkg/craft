@@ -22,17 +22,19 @@ impl Actor<CleanCacheActorPayload> for CleanCacheActor {
             return Ok(());
         }
 
-        let cache_dir = self.context.package_cache_dir();
-
-        if !cache_dir.exists() {
-            debug::info!("Cache directory does not exist: {:?}", cache_dir);
+        let store_dir = self.context.store_dir();
+        let legacy_cache_dir = self.context.legacy_cache_dir();
+        let has_cache = store_dir.exists() || legacy_cache_dir.exists();
+        if !has_cache {
+            debug::info!("Store directory does not exist: {:?}", store_dir);
             return Ok(());
         }
 
         println!("Hope you're sure what you're doing");
 
-        tokio::fs::remove_dir_all(&cache_dir).await?;
-        tokio::fs::create_dir_all(&cache_dir).await?;
+        fsutil::remove_entry(&store_dir).await?;
+        fsutil::remove_entry(&legacy_cache_dir).await?;
+        tokio::fs::create_dir_all(&store_dir).await?;
         println!("✓ Cleaned all package cache");
 
         Ok(())
