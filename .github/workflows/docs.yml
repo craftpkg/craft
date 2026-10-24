@@ -1,0 +1,63 @@
+name: Docs
+
+on:
+  push:
+    branches: [ "main" ]
+    paths: [ "docs/**", ".github/workflows/docs.yml" ]
+  pull_request:
+    paths: [ "docs/**", ".github/workflows/docs.yml" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Build craft
+      run: cargo build --release -p craft
+
+    - name: Install the site's dependencies with craft
+      working-directory: docs
+      run: ../target/release/craft ci
+
+    - name: Build the site
+      working-directory: docs
+      run: ../target/release/craft run docs:build
+
+    - name: Upload the site
+      if: github.event_name != 'pull_request'
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: docs/.vitepress/dist
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
