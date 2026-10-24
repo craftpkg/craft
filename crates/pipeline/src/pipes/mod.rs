@@ -1,3 +1,4 @@
+mod bins;
 pub mod install_pipe;
 pub mod linker_pipe;
 
