@@ -7,6 +7,7 @@ use crate::constants::{
 };
 use crate::{ContextError, Result};
 use crate::{HostPlatform, RegistryConfig};
+use progress::Reporter;
 
 #[derive(Debug, Clone)]
 pub struct Context {
@@ -18,6 +19,8 @@ pub struct Context {
     pub ci: bool,
     /// The platform optional and platform-specific packages are chosen for.
     pub platform: HostPlatform,
+    /// Where install progress and results go.
+    pub reporter: Reporter,
 }
 
 impl Context {
@@ -29,6 +32,7 @@ impl Context {
             verbose,
             ci: false,
             platform: HostPlatform::detect(),
+            reporter: Reporter::default(),
         }
     }
 
