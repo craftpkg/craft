@@ -61,47 +61,57 @@ impl Display for Commands {
     }
 }
 
+/// A command with its shortcuts resolved: `start`, `test` and unknown subcommands become `Run`,
+/// and no command becomes `Install`.
+#[derive(Debug, PartialEq)]
+pub enum Action {
+    Add { packages: Vec<String>, dev: bool },
+    Remove { packages: Vec<String> },
+    Run { script: String, args: Vec<String> },
+    Cache { command: CacheCommands },
+    Install,
+}
+
 impl Cli {
     pub fn parse_args() -> Self {
         Self::parse()
     }
 
-    pub fn normalize(&self) -> Commands {
-        match &self.command {
-            Some(cmd) => match cmd {
-                Commands::Add { packages, dev } => Commands::Add {
-                    packages: packages.clone(),
-                    dev: *dev,
-                },
-                Commands::Remove { packages } => Commands::Remove {
-                    packages: packages.clone(),
-                },
-                Commands::Run { script, args } => Commands::Run {
-                    script: script.clone(),
-                    args: args.clone(),
-                },
-                Commands::Cache { command } => Commands::Cache {
-                    command: command.clone(),
-                },
-                Commands::Start => Commands::Start,
-                Commands::Test => Commands::Run {
-                    script: "test".to_string(),
-                    args: vec![],
-                },
-                Commands::Install => Commands::Install,
-                Commands::External(args) => {
-                    if let Some(script) = args.first() {
-                        Commands::Run {
-                            script: script.clone(),
-                            args: args[1..].to_vec(),
-                        }
-                    } else {
-                        Commands::Install
-                    }
-                }
+    pub fn normalize(&self) -> Action {
+        let Some(command) = &self.command else {
+            return Action::Install;
+        };
+
+        match command {
+            Commands::Add { packages, dev } => Action::Add {
+                packages: packages.clone(),
+                dev: *dev,
             },
-            None => Commands::Install,
+            Commands::Remove { packages } => Action::Remove {
+                packages: packages.clone(),
+            },
+            Commands::Run { script, args } => Action::Run {
+                script: script.clone(),
+                args: args.clone(),
+            },
+            Commands::Cache { command } => Action::Cache {
+                command: command.clone(),
+            },
+            Commands::Start => run_script("start", &[]),
+            Commands::Test => run_script("test", &[]),
+            Commands::Install => Action::Install,
+            Commands::External(args) => match args.split_first() {
+                Some((script, args)) => run_script(script, args),
+                None => Action::Install,
+            },
         }
+    }
+}
+
+fn run_script(script: &str, args: &[String]) -> Action {
+    Action::Run {
+        script: script.to_string(),
+        args: args.to_vec(),
     }
 }
 
@@ -164,7 +174,7 @@ mod tests {
         // Verify normalization
         let normalized = cli.normalize();
         match normalized {
-            Commands::Run { script, args } => {
+            Action::Run { script, args } => {
                 assert_eq!(script, "test");
                 assert!(args.is_empty());
             }
@@ -177,7 +187,7 @@ mod tests {
         // craft with no args should default to install
         let cli = Cli::parse_from(["craft"]);
         let normalized = cli.normalize();
-        assert_eq!(normalized, Commands::Install);
+        assert_eq!(normalized, Action::Install);
     }
 
     #[test]
@@ -195,7 +205,7 @@ mod tests {
         // Verify normalization
         let normalized = cli.normalize();
         match normalized {
-            Commands::Run { script, args } => {
+            Action::Run { script, args } => {
                 assert_eq!(script, "tsc");
                 assert!(args.is_empty());
             }
@@ -220,12 +230,24 @@ mod tests {
         // Verify normalization
         let normalized = cli.normalize();
         match normalized {
-            Commands::Run { script, args } => {
+            Action::Run { script, args } => {
                 assert_eq!(script, "tsc");
                 assert_eq!(args, vec!["--version", "--help"]);
             }
             _ => panic!("Expected normalized to Run"),
         }
+    }
+
+    #[test]
+    fn test_start_command_normalizes_to_run() {
+        let cli = Cli::parse_from(["craft", "start"]);
+        assert_eq!(
+            cli.normalize(),
+            Action::Run {
+                script: "start".to_string(),
+                args: vec![],
+            }
+        );
     }
 
     #[test]
@@ -235,6 +257,6 @@ mod tests {
 
         // Verify normalization
         let normalized = cli.normalize();
-        assert_eq!(normalized, Commands::Install);
+        assert_eq!(normalized, Action::Install);
     }
 }
