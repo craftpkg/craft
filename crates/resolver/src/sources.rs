@@ -7,32 +7,27 @@ use package::PackageJson;
 use tarball::gzip::unzip;
 
 use crate::git::{GitSpec, checkout, resolve_commit};
-use crate::resolved_artifact::{git_package_dir, source_hash};
+use crate::resolved_artifact::{git_package_dir, short_hash};
 use crate::{ArtifactSource, ResolvedArtifact};
 
 const COPY_EXCLUDED: [&str; 2] = ["node_modules", ".git"];
 const UNVERSIONED: &str = "0.0.0";
 
-/// `file:<dir>`: copied into the cache on every install, so edits to the source show up.
+/// `file:<dir>`: read in place; the linker copies it into the project on every install, so
+/// edits to the source show up.
 pub(crate) async fn resolve_directory(
-    context: &Context,
     requested_name: Option<&str>,
     path: PathBuf,
 ) -> Result<ResolvedArtifact> {
     let manifest = read_manifest(&path)
         .await?
         .ok_or_else(|| anyhow!("{} has no package.json", path.display()))?;
-    let artifact = artifact_from(
+    artifact_from(
         Some(manifest),
         requested_name,
-        ArtifactSource::Directory { path: path.clone() },
+        ArtifactSource::Directory { path },
         None,
-    )?;
-
-    fsutil::replace_with_copy(&path, &artifact.package_dir(context), &COPY_EXCLUDED)
-        .await
-        .with_context(|| format!("failed to copy {}", path.display()))?;
-    Ok(artifact)
+    )
 }
 
 /// `link:<dir>`: used in place; its own dependencies are the linked project's business.
@@ -85,7 +80,7 @@ pub(crate) async fn resolve_remote_tarball(
 ) -> Result<ResolvedArtifact> {
     let cache_dir = context.store_dir();
     tokio::fs::create_dir_all(&cache_dir).await?;
-    let tarball_path = cache_dir.join(format!("tarball-url-{}.tgz", source_hash(url)));
+    let tarball_path = cache_dir.join(format!("tarball-url-{}.tgz", short_hash(url)));
     if !tarball_path.exists() {
         network
             .download(url, tarball_path.clone(), None)
@@ -160,7 +155,7 @@ async fn download_tarball(
 ) -> Result<()> {
     let tarball_path = context
         .store_dir()
-        .join(format!("git-{}.tgz", source_hash(url)));
+        .join(format!("git-{}.tgz", short_hash(url)));
     tokio::fs::create_dir_all(context.store_dir()).await?;
     network.download(url, tarball_path.clone(), None).await?;
     let extracted = unzip(tarball_path.clone(), package_dir.to_path_buf()).await;
