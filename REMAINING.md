@@ -64,8 +64,8 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 3.3 | Install from lockfile (skip resolution) | P0 | [x] |
 | 3.4 | `--frozen-lockfile` / `craft ci` | P1 | [x] |
 | **Phase 4 — Platform packages & lifecycle scripts** | | | |
-| 4.1 | `optionalDependencies` | P0 | [ ] |
-| 4.2 | `os` / `cpu` / `libc` filtering | P0 | [ ] |
+| 4.1 | `optionalDependencies` | P0 | [x] |
+| 4.2 | `os` / `cpu` / `libc` filtering | P0 | [x] |
 | 4.3 | Lifecycle scripts with an allowlist | P0 | [ ] |
 | **Phase 5 — Network & performance** | | | |
 | 5.1 | Abbreviated packuments | P2 | [ ] |
@@ -598,14 +598,18 @@ README says "`package-lock.json` support (coming soon)" — decide whether that 
 
 ## Phase 4 — Platform packages & lifecycle scripts
 
-✅ Today `esbuild` installs but `require('esbuild')` fails: its platform binary ships as an optional dependency (`@esbuild/darwin-arm64`) and its `postinstall` never runs. Same class: `@rollup/rollup-*`, `@swc/core-*`, `lightningcss-*`, `sharp`, `@next/swc-*`, `bcrypt`, `sqlite3`.
+~~Today `esbuild` installs but `require('esbuild')` fails: its platform binary ships as an optional dependency (`@esbuild/darwin-arm64`) and its `postinstall` never runs. Same class: `@rollup/rollup-*`, `@swc/core-*`, `lightningcss-*`, `sharp`, `@next/swc-*`, `bcrypt`, `sqlite3`.~~ Platform binaries install since 4.1/4.2; packages that build or download in `postinstall` (`bcrypt`, `sqlite3`, `sharp` < 0.33) still need 4.3.
 
-### 4.1 `optionalDependencies` · P0
+### 4.1 `optionalDependencies` · P0 — ✔ done
+
+> Done: packages' `optionalDependencies` resolve as `DependencyKind::Optional` edges (overriding a same-named `dependencies` entry, as npm does); a failing one is skipped with `warning: skipping optional dependency <pkg> of <dependent>: <cause>`. The lockfile records them under `optionalDependencies`. Not done: `optionalDependencies` in the project's own package.json (and `craft add -O`), `engines` / `deprecated` warnings.
 
 - Add `optional_dependencies` (and `peer_dependencies`, `peer_dependencies_meta`, `os`, `cpu`, `libc`, `has_install_script`, `deprecated`, `engines`) to the manifest struct (`crates/package/src/npm.rs`).
 - Resolve optional deps; any failure (resolve, download, platform mismatch, install script) skips that subtree with a warning instead of failing the install.
 
-### 4.2 `os` / `cpu` / `libc` filtering · P0
+### 4.2 `os` / `cpu` / `libc` filtering · P0 — ✔ done
+
+> Done: `contract::HostPlatform` names the host the Node way (`darwin`/`linux`/`win32`, `x64`/`arm64`/…, `glibc`/`musl` from `/lib/ld-musl-*` on Linux) and can be overridden with `CRAFT_OS` / `CRAFT_CPU` / `CRAFT_LIBC` (e.g. installing linux binaries while building a container image on a Mac). `package::PlatformConstraints` reads `os`/`cpu`/`libc` with npm's rules (`!` negation, libc only on Linux) and travels on `ResolvedArtifact` and in the lockfile. Packages for another platform are resolved and locked but never downloaded, imported, linked, hoisted or given bins, so one lockfile installs on every platform; a non-optional dependency on such a package fails (`mac-only@1.0.0 does not support linux-x64-glibc, but the project requires it`). Verified: `vite build` (rollup's 25 platform variants locked, one installed), and esbuild, `@swc/core` and `lightningcss` load their native binaries. Known gap: a foreign-platform package's own dependencies are not walked, so re-resolving drops them from the lockfile (binary packages rarely have any).
 
 - Skip packages whose `os`/`cpu` (supports `!` negation) don't match the host (`std::env::consts::{OS, ARCH}` mapped to Node names: `darwin`, `linux`, `win32`; `x64`, `arm64`, `ia32`).
 - `libc` (`glibc`/`musl`) detection on Linux.
