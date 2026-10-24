@@ -43,6 +43,8 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} -p craft
+        env:
+          CRAFT_RELEASE_VERSION: ${{ github.ref_name }}
 
       - name: Rename binary
         shell: bash
