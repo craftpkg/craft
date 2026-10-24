@@ -105,7 +105,8 @@ impl PackageFixture {
         Value::Object(self.manifest.clone())
     }
 
-    pub(crate) fn tarball(&self) -> Vec<u8> {
+    /// The package as an npm tarball, for tests that install it from a file or URL.
+    pub fn tarball(&self) -> Vec<u8> {
         let encoder = GzEncoder::new(Vec::new(), Compression::default());
         let mut archive = tar::Builder::new(encoder);
 
