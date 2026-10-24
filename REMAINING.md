@@ -54,9 +54,9 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 1.14 | Bin linking edge cases | P1 | [x] |
 | **Phase 2 — Store & layout redesign** | | | |
 | 2.1 | Global content-addressed store (read-only) | P0 | [x] |
-| 2.2 | Per-project virtual store `node_modules/.craft` | P0 | [ ] |
+| 2.2 | Per-project virtual store `node_modules/.craft` | P0 | [x] |
 | 2.3 | Peer dependency resolution | P0 | [ ] |
-| 2.4 | Bins inside the virtual store | P1 | [ ] |
+| 2.4 | Bins inside the virtual store | P1 | [x] |
 | 2.5 | Prune extraneous packages | P1 | [ ] |
 | **Phase 3 — Lockfile** | | | |
 | 3.1 | Lockfile format (text, deterministic) | P0 | [ ] |
@@ -493,7 +493,9 @@ project/node_modules/
 - Tarballs can be deleted after extraction (or kept under `~/.craft/cache/tarballs` for `cache clean` granularity).
 - `craft cache clean` targets the store; add `craft cache dir` / `craft cache prune` (remove entries unused by any lockfile — later).
 
-### 2.2 Per-project virtual store · P0
+### 2.2 Per-project virtual store · P0 — ✔ done
+
+> Done: `LinkerPipe` lays every node out as `node_modules/.craft/<entry>/node_modules/<name>` (`pipes::virtual_store`: `<name>@<version>`, `@scope+x`, `name@file+<hash>` / `@tarball+` / `@git+` for other sources, truncated + hashed past 120 chars). Store entries are imported once with `fsutil::import_dir` (clone → hardlink → copy via `reflink-copy`, stepping down once per process when a method fails); `file:` directories are re-imported from their source every install with clone → copy only, never hardlinked. Dependencies are relative symlinks beside each package, root dependencies are relative links into `.craft`, `link:` targets stay absolute. Every package name is hoisted once into `.craft/node_modules` (the project's own dependency, else the highest version), so undeclared requires resolve while the project's root stays strict. Nothing is written outside the project, so the store is now immutable. Verified: concurrent installs 20/20; two projects on one store keep different transitive versions; the project keeps working after `~/.craft` is deleted; on APFS a second 80 MB project cost ~7 MB of disk (clones); linking a 218-package tree takes ~60 ms. The peer scenario (`@tanstack/react-query` + root `react`) now passes through the project root and hoisting; per-subtree peer variants are still 2.3.
 
 - Materialize each graph node into `node_modules/.craft/<escaped-id>/node_modules/<name>`:
   macOS `clonefile` (APFS), Linux `ioctl FICLONE` → hardlink → copy fallback; Windows hardlink → copy.
@@ -518,7 +520,9 @@ project/node_modules/
 
 **Done when** `require('@tanstack/react-query')` works with `react` as a root dependency and the same project builds with two different `react` peers in two subtrees.
 
-### 2.4 Bins inside the virtual store · P1
+### 2.4 Bins inside the virtual store · P1 — ✔ done
+
+> Done with 2.2: each `.craft/<entry>/node_modules/.bin` gets its package's dependency bins (same normalization and conflict rule as 1.14); the root `.bin` holds direct dependencies only.
 
 - Each virtual-store `node_modules/` gets a `.bin` for its node's dependencies, so lifecycle scripts (4.3) and nested tools find their bins.
 - Root `node_modules/.bin` only for direct dependencies (npm also exposes transitive bins at root when hoisted — decide and document).
