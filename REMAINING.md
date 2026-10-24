@@ -48,7 +48,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 1.8 | Symlink-safe filesystem helpers (dangling links) | P0 | [x] |
 | 1.9 | `craft add` fixes | P1 | [x] |
 | 1.10 | Preserve `package.json` formatting and key order | P1 | [x] |
-| 1.11 | `craft remove` fixes | P1 | [ ] |
+| 1.11 | `craft remove` fixes | P1 | [x] |
 | 1.12 | `craft run` fixes (PATH, exit code, quoting, pre/post, env) | P1 | [ ] |
 | 1.13 | Git / tarball-URL / `file:` / `link:` dependencies | P1 | [ ] |
 | 1.14 | Bin linking edge cases | P1 | [ ] |
@@ -364,7 +364,9 @@ Use relative symlink targets where possible (relocatable `node_modules`). Use it
 
 **Done when** `add` then `remove` of the same package produces a byte-identical `package.json`.
 
-### 1.11 `craft remove` fixes · P1 ✅
+### 1.11 `craft remove` fixes · P1 ✅ — ✔ done
+
+> Done: `craft remove` deletes every `.bin` link whose target (resolved lexically, relative or absolute) lies inside the removed package, so other packages' bins stay. A package listed in neither dependency section prints `warning: <pkg> is not a dependency of this project` to stderr and leaves `package.json` untouched. Dangling links (1.8) and write-only-when-changed (1.10) were already done. Left for later: pruning orphaned transitive deps (2.5) and updating the lockfile (Phase 3).
 
 **Problems** (`crates/actor/src/remove_package_actor.rs`)
 - Dangling symlinks not removed (1.8).
