@@ -206,3 +206,22 @@ fn identifies_itself_to_the_registry() {
     });
     assert!(all_craft, "{user_agents:?}");
 }
+
+#[test]
+fn limits_requests_in_flight() {
+    let registry = MockRegistry::start();
+    let mut dependencies = serde_json::Map::new();
+    for index in 0..30 {
+        let name = format!("pkg-{index}");
+        registry.publish(PackageFixture::new(&name, "1.0.0"));
+        dependencies.insert(name, json!("^1.0.0"));
+    }
+    let project = Project::new(&registry, json!({ "dependencies": dependencies }));
+    project.write_file(".npmrc", "network-concurrency=2\n");
+
+    project.craft().arg("install").assert().success();
+
+    let max_in_flight = registry.max_concurrent_requests();
+    assert!(max_in_flight <= 4, "{max_in_flight} requests at once");
+    assert!(max_in_flight >= 2, "{max_in_flight} requests at once");
+}
