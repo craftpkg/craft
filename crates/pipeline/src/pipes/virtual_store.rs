@@ -87,6 +87,7 @@ mod tests {
             version: "5.90.10".to_string(),
             source,
             integrity: None,
+            platform: Default::default(),
             package: None,
         }
     }
