@@ -19,6 +19,12 @@ pub enum PipelineError {
 }
 
 #[derive(Error, Debug)]
+pub enum ContextError {
+    #[error("could not determine home directory; set CRAFT_HOME")]
+    NoHomeDir,
+}
+
+#[derive(Error, Debug)]
 pub enum PackageError {
     #[error("no package.json found")]
     NoPackageJson,
