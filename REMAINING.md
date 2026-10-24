@@ -62,7 +62,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 3.1 | Lockfile format (text, deterministic) | P0 | [x] |
 | 3.2 | Write lockfile after install/add/remove | P0 | [x] |
 | 3.3 | Install from lockfile (skip resolution) | P0 | [x] |
-| 3.4 | `--frozen-lockfile` / `craft ci` | P1 | [ ] |
+| 3.4 | `--frozen-lockfile` / `craft ci` | P1 | [x] |
 | **Phase 4 — Platform packages & lifecycle scripts** | | | |
 | 4.1 | `optionalDependencies` | P0 | [ ] |
 | 4.2 | `os` / `cpu` / `libc` filtering | P0 | [ ] |
@@ -587,7 +587,9 @@ README says "`package-lock.json` support (coming soon)" — decide whether that 
 - If some specifiers changed, keep locked versions for unchanged deps and re-resolve only the changed subtrees.
 - Fast path: if `node_modules/.craft/lock` equals `craft.lock`, print "Already up to date" and exit (measured warm install today: ~3.3 s, all from re-fetching packuments).
 
-### 3.4 `--frozen-lockfile` / `craft ci` · P1
+### 3.4 `--frozen-lockfile` / `craft ci` · P1 — ✔ done
+
+> Done: `craft install --frozen-lockfile` (on by default when `CI` is set and not `0`/`false`, via `Context::ci`) fails before any request when craft.lock is missing (`craft.lock is missing; run `craft install` to create it`) or disagrees with package.json, listing every difference (`debug (^4.4.0 in package.json, ^4.0.0 in craft.lock), ms (not in craft.lock), react (not in package.json)`). The resolver then runs frozen: a registry or git request the lockfile can't answer is an error (`ms@^2.1.3 is not in craft.lock`) instead of a metadata fetch, and the lockfile is never rewritten. `craft ci` removes `node_modules` and runs a frozen install. The e2e harness clears `CI` so the suite behaves the same on CI runners.
 
 - `--frozen-lockfile`: fail if the lockfile is missing or out of date with `package.json`. Default on when `CI=true`.
 - `craft ci`: remove `node_modules`, then frozen install.
