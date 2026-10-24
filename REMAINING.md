@@ -74,7 +74,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 5.4 | Timeouts, retries, User-Agent | P2 | [ ] |
 | 5.5 | Streaming downloads (hash while writing) | P2 | [ ] |
 | 5.6 | Metadata disk cache (ETag / 304) | P2 | [ ] |
-| 5.7 | Registry configuration (`.npmrc`, scopes, auth) | P1 | [ ] |
+| 5.7 | Registry configuration (`.npmrc`, scopes, auth) | P1 | [x] |
 | **Phase 6 — CLI & UX** | | | |
 | 6.1 | Progress output and install summary | P2 | [ ] |
 | 6.2 | Error reporting (no panics, contextual messages) | P2 | [ ] |
@@ -660,7 +660,9 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 
 - Cache packuments under `~/.craft/cache/metadata/` with `ETag`/`Last-Modified`; revalidate with `If-None-Match` (304). `--prefer-offline` / `--offline` flags.
 
-### 5.7 Registry configuration · P1
+### 5.7 Registry configuration · P1 — ✔ done
+
+> Done: `contract::RegistryConfig` layers `~/.npmrc` (or `NPM_CONFIG_USERCONFIG`), the project's `.npmrc`, then `npm_config_*` variables, with `CRAFT_REGISTRY` overriding the default registry. It reads `registry`, `@scope:registry`, `//host/path/:_authToken`, `:_auth`, `:username` + `:_password`, legacy top-level `_authToken`, `https-proxy` / `proxy` / `noproxy`, `strict-ssl` and `cafile`, with `${VAR}` expansion and quoting. `Network` builds its client from it and sends each URL only the credentials of its longest matching `//host/path/` prefix, so tarballs on a private host are authenticated and other hosts never see the token; credentials print as `<redacted>`. Scoped packuments are requested as `@scope%2fname`. Verified: a token-protected mock registry via `${PRIVATE_TOKEN}`, a scoped registry with its own token while the public one never sees it, `--verbose` never printing the token, and JSR (`@jsr:registry=https://npm.jsr.io`) against the real network. Not done: `always-auth`, client certificates (`certfile`/`keyfile`), and `.npmrc` sections.
 
 - Registry is hardcoded (`npm.rs:23`). Read `.npmrc` (project, user `~/.npmrc`, env `npm_config_*`): `registry`, `@scope:registry`, `//host/:_authToken`, `_auth`, `always-auth`, `strict-ssl`, `cafile`, proxies (`https-proxy`, `HTTPS_PROXY`).
 - URL-encode scoped names: `@scope%2fname`.
