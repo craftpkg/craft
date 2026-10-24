@@ -96,7 +96,7 @@ fetch-retries=3
 network-concurrency=16
 ```
 
-Supported keys: `registry`, `@scope:registry`, `//host/:_authToken`, `_auth`, `username` + `_password`, `https-proxy`, `proxy`, `noproxy`, `strict-ssl`, `cafile`, `fetch-retries`, `network-concurrency`, `offline`, `prefer-offline`. Credentials are only ever sent to the host they're configured for.
+Supported keys: `registry`, `@scope:registry`, `//host/:_authToken`, `_auth`, `username` + `_password`, `https-proxy`, `proxy`, `noproxy`, `strict-ssl`, `cafile`, `fetch-retries`, `network-concurrency`, `offline`, `prefer-offline`. Credentials are only ever sent to the host they're configured for. HTTPS uses craft's bundled root certificates; point `cafile` at your CA's certificate to use a private registry or a TLS-inspecting proxy.
 
 | Environment variable | Purpose |
 | --- | --- |
@@ -107,7 +107,7 @@ Supported keys: `registry`, `@scope:registry`, `//host/:_authToken`, `_auth`, `u
 
 ## 🤝 Contributing
 
-Contributions are welcome! `make` runs formatting, lints and the full test suite (the end-to-end tests need Node.js on `PATH`).
+Contributions are welcome! `make` runs formatting, lints and the full test suite against a local mock registry (the end-to-end tests need Node.js on `PATH`). `make real-world` runs scenarios with real packages against registry.npmjs.org and GitHub.
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
