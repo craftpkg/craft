@@ -107,7 +107,9 @@ fn saves_exact_versions_with_the_exact_flag() {
 #[test]
 fn moves_a_dependency_between_sections() {
     let registry = MockRegistry::start();
-    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    registry
+        .publish(PackageFixture::new("ms", "2.1.3"))
+        .publish(PackageFixture::new("zod", "3.25.0"));
     let project = Project::new(
         &registry,
         json!({ "dependencies": { "ms": "^2.0.0", "zod": "^3.0.0" } }),
@@ -163,7 +165,9 @@ fn fails_before_installing_without_package_json() {
 #[test]
 fn add_then_remove_leaves_package_json_unchanged() {
     let registry = MockRegistry::start();
-    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    registry
+        .publish(PackageFixture::new("ms", "2.1.3"))
+        .publish(PackageFixture::new("zod", "3.25.0"));
     let project = Project::new(&registry, json!({}));
     let original = "{\n    \"name\": \"app\",\n    \"private\": true,\n    \"type\": \"module\",\n    \"dependencies\": {\n        \"zod\": \"^3.0.0\"\n    }\n}\n";
     project.write_file("package.json", original);
