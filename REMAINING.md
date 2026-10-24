@@ -49,7 +49,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 1.9 | `craft add` fixes | P1 | [x] |
 | 1.10 | Preserve `package.json` formatting and key order | P1 | [x] |
 | 1.11 | `craft remove` fixes | P1 | [x] |
-| 1.12 | `craft run` fixes (PATH, exit code, quoting, pre/post, env) | P1 | [ ] |
+| 1.12 | `craft run` fixes (PATH, exit code, quoting, pre/post, env) | P1 | [x] |
 | 1.13 | Git / tarball-URL / `file:` / `link:` dependencies | P1 | [ ] |
 | 1.14 | Bin linking edge cases | P1 | [ ] |
 | **Phase 2 — Store & layout redesign** | | | |
@@ -376,7 +376,9 @@ Use relative symlink targets where possible (relocatable `node_modules`). Use it
 
 **Fix** — use 1.8 helpers; remove bins whose link target is inside the removed package; only write when changed (1.10); warn `<pkg> is not a dependency`; update lockfile (Phase 3).
 
-### 1.12 `craft run` fixes · P1 ✅
+### 1.12 `craft run` fixes · P1 ✅ — ✔ done
+
+> Done: scripts run with every ancestor's `node_modules/.bin` in front of `PATH`, `INIT_CWD`, `npm_lifecycle_event`/`_script`, `npm_package_name`/`_version`/`_json` and `npm_config_user_agent=craft/<ver> <platform> <arch>`. `pre<name>`/`post<name>` run around the script, stopping at the first failure, and only the main script gets the arguments, each shell-quoted. Without a matching script, `craft <name>` / `craft run <name>` spawns the nearest `node_modules/.bin/<name>` directly with an argv array, and works without a `package.json`. Otherwise it fails with `script "<name>" not found; available scripts: …` — the raw-shell fallback is gone (`craft exec`, 6.3). A failing script exits craft with its own code (128 + signal when killed) and one `error: <name> exited with code N` line. craft ignores SIGINT while the child runs, so Ctrl-C reaches the script through the terminal's process group and craft exits with the script's code. Not done: adding the `node` binary's directory to `PATH`, and Windows `cmd` quoting beyond the basics (6.4).
 
 **Problems** (`crates/actor/src/run_script_actor.rs`, `crates/process/src/process.rs`)
 
