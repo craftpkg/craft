@@ -97,7 +97,7 @@ impl InstallPipe {
                 dependencies: Vec::new(),
                 peers: Vec::new(),
             };
-            self.nodes.lock().await.insert(node_id.clone(), node);
+            self.record(node_id.clone(), node).await;
             return Ok(node_id);
         }
 
@@ -111,14 +111,12 @@ impl InstallPipe {
             .resolve_peer_candidates(&artifact, &dependencies, &ancestry)
             .await;
 
-        self.nodes.lock().await.insert(
-            node_id.clone(),
-            ResolvedNode {
-                artifact,
-                dependencies,
-                peers,
-            },
-        );
+        let node = ResolvedNode {
+            artifact,
+            dependencies,
+            peers,
+        };
+        self.record(node_id.clone(), node).await;
         Ok(node_id)
     }
 
@@ -173,6 +171,16 @@ impl InstallPipe {
             .buffered(DEPENDENCY_CONCURRENCY)
             .collect()
             .await
+    }
+
+    async fn record(&self, node_id: NodeId, node: ResolvedNode) {
+        let mut nodes = self.nodes.lock().await;
+        nodes.insert(node_id, node);
+        let count = nodes.len();
+        let noun = if count == 1 { "package" } else { "packages" };
+        self.context
+            .reporter
+            .status(format!("Resolving dependencies… {count} {noun}"));
     }
 
     /// Downloads and extracts a registry package into the store; other sources are
@@ -234,10 +242,10 @@ impl InstallPipe {
                 let target = match self.resolve_package(&package, ancestry).await {
                     Ok(target) => target,
                     Err(error) if kind == DependencyKind::Optional => {
-                        eprintln!(
-                            "warning: skipping optional dependency {package} of {}: {error:#}",
+                        self.context.reporter.warn(format!(
+                            "skipping optional dependency {package} of {}: {error:#}",
                             artifact.name
-                        );
+                        ));
                         return Ok(None);
                     }
                     Err(error) => return Err(error),
@@ -309,7 +317,7 @@ impl Pipeline<ResolutionGraph> for InstallPipe {
 
         let resolved = resolve_peers(&ResolutionGraph { roots, nodes });
         for warning in &resolved.warnings {
-            eprintln!("warning: {warning}");
+            self.context.reporter.warn(warning);
         }
         Ok(resolved.graph)
     }
