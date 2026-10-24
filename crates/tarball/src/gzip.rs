@@ -11,13 +11,32 @@ const EXECUTE_BITS: u32 = 0o111;
 
 /// Extracts an npm tarball into `dest`, dropping the root folder its entries sit under:
 /// `package/` for most packages, but `@types/*` use `node/` and older packages other names.
+/// `dest` appears only once fully extracted; if another process extracts it first, theirs is kept.
 pub async fn unzip(source: PathBuf, dest: PathBuf) -> contract::Result<()> {
-    tokio::task::spawn_blocking(move || extract(&source, &dest)).await?
+    tokio::task::spawn_blocking(move || extract_atomically(&source, &dest)).await?
+}
+
+fn extract_atomically(source: &Path, dest: &Path) -> contract::Result<()> {
+    let parent = dest.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(parent)?;
+    let staging = tempfile::Builder::new()
+        .prefix(".extract-")
+        .tempdir_in(parent)?;
+
+    extract(source, staging.path())?;
+
+    match fs::rename(staging.path(), dest) {
+        Ok(()) => {
+            let _ = staging.keep();
+            Ok(())
+        }
+        Err(_) if dest.exists() => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn extract(source: &Path, dest: &Path) -> contract::Result<()> {
     let mut archive = Archive::new(GzDecoder::new(File::open(source)?));
-    fs::create_dir_all(dest)?;
 
     for entry in archive.entries()? {
         let mut entry = entry?;
@@ -136,6 +155,33 @@ mod tests {
         assert!(dest.join("index.d.ts").exists());
         assert!(dest.join("package.json").exists());
         assert!(!dest.join("node").exists());
+    }
+
+    #[tokio::test]
+    async fn test_keeps_an_extraction_that_finished_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = tarball(dir.path(), &[Entry::file("package/index.js", "new")]);
+        let dest = dir.path().join("pkg-1.0.0/package");
+        fs::create_dir_all(&dest).unwrap();
+        fs::write(dest.join("index.js"), "first").unwrap();
+
+        unzip(source, dest.clone()).await.unwrap();
+
+        assert_eq!(fs::read_to_string(dest.join("index.js")).unwrap(), "first");
+        assert_eq!(fs::read_dir(dest.parent().unwrap()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_failed_extraction_leaves_nothing_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("truncated.tgz");
+        fs::write(&source, b"not a gzip stream").unwrap();
+        let dest = dir.path().join("pkg-1.0.0/package");
+
+        assert!(unzip(source, dest.clone()).await.is_err());
+
+        assert!(!dest.exists());
+        assert_eq!(fs::read_dir(dest.parent().unwrap()).unwrap().count(), 0);
     }
 
     #[tokio::test]
