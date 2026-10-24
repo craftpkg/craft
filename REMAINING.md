@@ -57,7 +57,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 2.2 | Per-project virtual store `node_modules/.craft` | P0 | [x] |
 | 2.3 | Peer dependency resolution | P0 | [ ] |
 | 2.4 | Bins inside the virtual store | P1 | [x] |
-| 2.5 | Prune extraneous packages | P1 | [ ] |
+| 2.5 | Prune extraneous packages | P1 | [x] |
 | **Phase 3 — Lockfile** | | | |
 | 3.1 | Lockfile format (text, deterministic) | P0 | [ ] |
 | 3.2 | Write lockfile after install/add/remove | P0 | [ ] |
@@ -527,7 +527,9 @@ project/node_modules/
 - Each virtual-store `node_modules/` gets a `.bin` for its node's dependencies, so lifecycle scripts (4.3) and nested tools find their bins.
 - Root `node_modules/.bin` only for direct dependencies (npm also exposes transitive bins at root when hoisted — decide and document).
 
-### 2.5 Prune extraneous packages · P1
+### 2.5 Prune extraneous packages · P1 — ✔ done
+
+> Done: `pipeline::prune_node_modules` runs after every link. It removes top-level symlinks for packages outside the graph (old-layout leftovers included; real directories and dot entries such as `.cache` are left alone), then every `.craft/<entry>` no top-level link reaches by following each entry's dependency links (staging leftovers too), then dangling hoist links and root bins, and empty `@scope` directories. `craft remove` runs the same reachability pass without the network, so orphaned transitive dependencies go with the package while shared ones stay. `craft add` now installs the project's existing dependencies together with the added ones (an added name replaces the existing entry), since pruning needs the full graph — as npm does. Verified on the Vite/React project: `craft remove eslint` took the virtual store from 218 to 135 entries, re-adding restored 218 and `eslint` ran.
 
 - After linking, delete root `node_modules/*` entries and `.craft/*` entries not in the current graph (respecting scoped dirs and `.bin`).
 - Makes `craft remove` and editing `package.json` + `craft install` correct.
