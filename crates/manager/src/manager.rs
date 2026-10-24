@@ -141,8 +141,10 @@ mod tests {
     async fn test_cache_clean_with_force_empties_cache() -> Result<()> {
         let temp_dir = tempfile::tempdir()?;
         let manager = temp_manager(&temp_dir);
-        let cached_package = manager.context.package_cache_dir().join("ms-2.1.3");
+        let cached_package = manager.context.store_dir().join("ms@2.1.3-0123456789ab");
+        let legacy_package = manager.context.legacy_cache_dir().join("ms-2.1.3");
         tokio::fs::create_dir_all(&cached_package).await?;
+        tokio::fs::create_dir_all(&legacy_package).await?;
 
         manager
             .handle_command(Action::Cache {
@@ -151,7 +153,8 @@ mod tests {
             .await?;
 
         assert!(!cached_package.exists());
-        assert!(manager.context.package_cache_dir().exists());
+        assert!(!manager.context.legacy_cache_dir().exists());
+        assert!(manager.context.store_dir().exists());
         Ok(())
     }
 
@@ -159,7 +162,7 @@ mod tests {
     async fn test_cache_clean_without_force_keeps_cache() -> Result<()> {
         let temp_dir = tempfile::tempdir()?;
         let manager = temp_manager(&temp_dir);
-        let cached_package = manager.context.package_cache_dir().join("ms-2.1.3");
+        let cached_package = manager.context.store_dir().join("ms@2.1.3-0123456789ab");
         tokio::fs::create_dir_all(&cached_package).await?;
 
         manager
