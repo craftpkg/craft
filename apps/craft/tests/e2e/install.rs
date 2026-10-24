@@ -271,7 +271,6 @@ fn links_aliased_transitive_dependencies() {
 }
 
 #[test]
-#[ignore = "fixed by 1.4: tarballs without a package/ root link to a missing directory"]
 fn installs_tarballs_with_a_non_standard_root_dir() {
     let registry = MockRegistry::start();
     registry.publish(
