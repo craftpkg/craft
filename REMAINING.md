@@ -39,8 +39,8 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 0.4 | Lint/CI hygiene (`clippy --all-targets`, fmt, workspace lints, dead code) | P2 | [x] |
 | **Phase 1 — Correctness fixes (current layout)** | | | |
 | 1.1 | Dependency spec classification — no more panics | P0 | [x] |
-| 1.2 | `InstallPipe` returns a resolution graph, not a flat list | P0 | [ ] |
-| 1.3 | npm alias linking (root + transitive) | P0 | [ ] |
+| 1.2 | `InstallPipe` returns a resolution graph, not a flat list | P0 | [x] |
+| 1.3 | npm alias linking (root + transitive) | P0 | [x] |
 | 1.4 | Tarball root-directory stripping | P0 | [ ] |
 | 1.5 | HTTP status checks + friendly registry errors | P0 | [ ] |
 | 1.6 | Atomic download and extraction | P0 | [ ] |
@@ -209,11 +209,11 @@ pub enum DependencySpec {
 
 **Done when** the spec table above is unit-tested; the E2E dist-tag fixture installs; no `expect` remains in `resolver`/`pipeline` non-test code.
 
-### 1.2 `InstallPipe` returns a resolution graph · P0 📖
+### 1.2 `InstallPipe` returns a resolution graph · P0 📖 — ✔ done
 
 **Problem** — `InstallPipe::run` returns a deduplicated `Vec<ResolvedArtifact>` (`install_pipe.rs:149-165`). The linker then **re-guesses** which artifact each dependency edge meant by name + "highest satisfying version" (`linker_pipe.rs:46-64`, `125-148`). Every alias, multi-version and "which version did the root resolve to" bug comes from this lost information.
 
-> Partly done in 1.1: `InstallPipe` returns an `Installation { artifacts, roots }`, where each `ResolvedRoot` pairs a requested package with the artifact it resolved to, and the linker links roots from that instead of re-matching versions. Transitive edges are still re-guessed by name + highest satisfying version in `hydrate_artifact`.
+> Done: `resolver::graph` defines `ResolutionGraph { roots, nodes }`, `ResolvedNode { artifact, dependencies }` and `Edge { name, spec, target, kind }` keyed by `NodeId` (`name@version`, `BTreeMap` for deterministic order). `InstallPipe::resolve_package` returns the `NodeId` each request resolved to and records edges as it recurses; each version is downloaded and walked once (claimed-node set), and cycles resolve without waiting on themselves. `LinkerPipe` links exactly the graph's edges and no longer depends on `node-semver`. `craft add` reads root edges from the graph.
 
 **Fix**
 - Return a graph:
@@ -233,7 +233,9 @@ pub struct Edge { link_name: String /* alias-aware */, spec: String, target: Nod
 
 **Done when** `LinkerPipe` has no version matching logic and links exactly the edges it's given.
 
-### 1.3 npm alias linking · P0 ✅
+### 1.3 npm alias linking · P0 ✅ — ✔ done
+
+> Done with 1.2: every link is created at `node_modules/<edge.name>`, so root and transitive aliases resolve under Node, and `craft add sw@npm:string-width@^4.2.0` saves `"sw": "npm:string-width@^4.2.3"`. Verified against the real registry with `@isaacs/cliui` (`string-width-cjs`).
 
 **Problem** — aliases resolve but never link. `artifact_map` is keyed by real name, lookups use the alias name (`linker_pipe.rs:46`, `117`), and the destination uses `artifact.name` (`linker_pipe.rs:168`).
 
@@ -398,7 +400,7 @@ Can be split: tarball URL + `file:` + `link:` first (simple), git hosts second.
 
 **Problems** (`linker_pipe.rs:203-266`)
 - String `bin` on a scoped package uses `@scope/name` as the bin name → tries to create `.bin/@scope/name` (ENOENT). Correct name is the part after `/`.
-- Bin source path for transitive deps uses `artifact.name`, not the alias link name (`linker_pipe.rs:232`).
+- ~~Bin source path for transitive deps uses `artifact.name`, not the alias link name~~ (fixed in 1.2: bins resolve through `edge.name`).
 - `directories.bin` not supported.
 - Bin names/paths from manifests are not sanitized (a bin named `../../x` writes outside `.bin`).
 - Two packages providing the same bin race in parallel linking (`buffer_unordered(10)` over roots, `linker_pipe.rs:304-311`) → nondeterministic winner / `EEXIST`.
