@@ -2,6 +2,7 @@ mod download_artifact;
 mod git;
 pub mod graph;
 mod locked;
+mod metadata_cache;
 pub mod npm;
 pub mod resolved_artifact;
 pub mod resolver;
