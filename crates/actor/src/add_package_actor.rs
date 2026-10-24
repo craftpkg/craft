@@ -1,7 +1,7 @@
 use contract::{Actor, Context, Pipeline};
 use package::{DependencySection, InstallPackage, ProjectManifest};
 use pipeline::{InstallPipe, LinkerPipe};
-use resolver::{Edge, ResolvedArtifact};
+use resolver::{ArtifactSource, Edge, ResolvedArtifact};
 
 #[derive(Debug)]
 pub struct AddActorPayload {
@@ -57,8 +57,17 @@ impl Actor<AddActorPayload> for AddPackageActor {
 }
 
 /// The spec written to package.json, as npm saves it: a caret range on the resolved version (or
-/// the exact version with `--exact`), kept behind the `npm:` prefix for an alias.
+/// the exact version with `--exact`), kept behind the `npm:` prefix for an alias. Local and URL
+/// dependencies keep their location.
 fn saved_spec(root: &Edge, artifact: &ResolvedArtifact, is_exact: bool) -> String {
+    let is_registry_package = matches!(artifact.source, ArtifactSource::Registry { .. });
+    if !is_registry_package {
+        return root
+            .spec
+            .clone()
+            .unwrap_or_else(|| artifact.version.clone());
+    }
+
     let range = if is_exact {
         artifact.version.clone()
     } else {
@@ -158,7 +167,9 @@ mod tests {
         ResolvedArtifact {
             name: name.to_string(),
             version: version.to_string(),
-            download_url: String::new(),
+            source: ArtifactSource::Registry {
+                tarball_url: String::new(),
+            },
             integrity: None,
             package: None,
         }
