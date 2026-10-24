@@ -216,6 +216,7 @@ fn sections(lockfile: &Lockfile) -> Vec<(&'static str, Vec<(&String, &String)>)>
     vec![
         ("dependencies", entries(&root.dependencies)),
         ("devDependencies", entries(&root.dev_dependencies)),
+        ("optionalDependencies", entries(&root.optional_dependencies)),
     ]
 }
 
@@ -288,6 +289,7 @@ mod tests {
                     ("ui".to_string(), locked("^1.0.0", "ui@1.0.0_react@19.2.0")),
                 ]),
                 dev_dependencies: BTreeMap::from([("ms".to_string(), locked("2.0.0", "ms@2.0.0"))]),
+                optional_dependencies: BTreeMap::new(),
             },
         );
         lockfile
