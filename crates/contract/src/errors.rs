@@ -25,6 +25,15 @@ pub enum NetworkError {
 }
 
 #[derive(Error, Debug)]
+pub enum IntegrityError {
+    #[error("tarball integrity mismatch: expected {expected}, got {actual}")]
+    Mismatch { expected: String, actual: String },
+
+    #[error("unsupported or malformed integrity: {integrity}")]
+    Invalid { integrity: String },
+}
+
+#[derive(Error, Debug)]
 pub enum RegistryError {
     #[error("package {name} not found in {registry}")]
     PackageNotFound { name: String, registry: String },
