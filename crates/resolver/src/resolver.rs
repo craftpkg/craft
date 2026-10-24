@@ -1,4 +1,5 @@
 use crate::{NpmResolver, ResolvedArtifact, download_artifact::DownloadArtifact};
+use anyhow::Context;
 use contract::{Result, SpecError};
 use network::Network;
 use package::{DependencySpec, InstallPackage};
@@ -30,13 +31,9 @@ impl Resolver {
         let spec = DependencySpec::parse(&package.name, package.version.as_deref())?;
 
         let Some((name, requirement)) = spec.registry_target() else {
-            let dependency = match &package.version {
-                Some(version) => format!("{}@{}", package.name, version),
-                None => package.name.clone(),
-            };
             return Err(SpecError::Unsupported {
                 kind: spec.kind(),
-                dependency,
+                dependency: package.to_string(),
             }
             .into());
         };
@@ -88,7 +85,10 @@ impl Resolver {
 
         self.network
             .download(&artifact.download_url, file_path.clone())
-            .await?;
+            .await
+            .with_context(|| {
+                format!("failed to download {}@{}", artifact.name, artifact.version)
+            })?;
 
         debug::info!("Successfully downloaded {}", artifact.name);
 
