@@ -11,6 +11,20 @@ use tokio::sync::Mutex;
 
 type LockedPackage = Arc<Mutex<HashMap<String, Arc<Mutex<Option<ResolvedArtifact>>>>>>;
 
+/// Everything an install resolved: every artifact in the tree, and the artifact each
+/// requested root package resolved to.
+#[derive(Debug, Clone)]
+pub struct Installation {
+    pub artifacts: Vec<ResolvedArtifact>,
+    pub roots: Vec<ResolvedRoot>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedRoot {
+    pub package: InstallPackage,
+    pub artifact: ResolvedArtifact,
+}
+
 pub struct InstallPipe {
     packages: Vec<InstallPackage>,
     cache_dir: PathBuf,
@@ -122,8 +136,8 @@ impl InstallPipe {
     }
 }
 
-impl Pipeline<Vec<ResolvedArtifact>> for InstallPipe {
-    async fn run(&self) -> Result<Vec<ResolvedArtifact>> {
+impl Pipeline<Installation> for InstallPipe {
+    async fn run(&self) -> Result<Installation> {
         debug::trace!("Installing packages: {pkgs:?}", pkgs = self.packages);
 
         // Clone packages to avoid lifetime issues with async closures
@@ -168,6 +182,21 @@ impl Pipeline<Vec<ResolvedArtifact>> for InstallPipe {
             }
         }
 
-        Ok(artifacts)
+        let mut roots = Vec::with_capacity(self.packages.len());
+        for package in &self.packages {
+            let resolved = match locked.get(&package.to_cache_key()) {
+                Some(lock) => lock.lock().await.clone(),
+                None => None,
+            };
+            let artifact = resolved.ok_or_else(|| {
+                anyhow::anyhow!("{} was requested but never resolved", package.name)
+            })?;
+            roots.push(ResolvedRoot {
+                package: package.clone(),
+                artifact,
+            });
+        }
+
+        Ok(Installation { artifacts, roots })
     }
 }
