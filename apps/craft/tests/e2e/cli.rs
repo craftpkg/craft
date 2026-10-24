@@ -10,12 +10,39 @@ fn prints_its_version() {
     let registry = MockRegistry::start();
     let project = Project::new(&registry, json!({}));
 
+    for flag in ["--version", "-v", "-V"] {
+        project
+            .craft()
+            .arg(flag)
+            .assert()
+            .success()
+            .stdout(format!("craft {}\n", env!("CARGO_PKG_VERSION")));
+    }
+}
+
+#[test]
+fn passes_version_flags_to_bins() {
+    let registry = MockRegistry::start();
+    registry.publish(
+        PackageFixture::new("echo-args", "1.0.0")
+            .file(
+                "cli.js",
+                "#!/usr/bin/env node\nconsole.log(process.argv.slice(2).join(' '));\n",
+            )
+            .manifest_field("bin", json!({ "echo-args": "cli.js" })),
+    );
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "echo-args": "1.0.0" } }),
+    );
+    project.craft().arg("install").assert().success();
+
     project
         .craft()
-        .arg("--version")
+        .args(["echo-args", "-v", "--version"])
         .assert()
         .success()
-        .stdout(format!("craft {}\n", env!("CARGO_PKG_VERSION")));
+        .stdout("-v --version\n");
 }
 
 #[test]
