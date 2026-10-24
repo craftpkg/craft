@@ -1,14 +1,16 @@
 use std::fmt::Display;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
+use contract::CRAFT_VERSION;
 
 #[derive(Parser, Debug)]
-#[command(name = "craft")]
-#[command(about = "A package manager CLI", long_about = None)]
+#[command(name = "craft", version = CRAFT_VERSION)]
+#[command(about = "A fast, strict package manager for Node.js", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
+    /// Print what craft is doing.
     #[arg(short, long, global = true)]
     pub verbose: bool,
 
@@ -29,34 +31,46 @@ impl Display for Cli {
 
 #[derive(Subcommand, Debug, PartialEq)]
 pub enum Commands {
+    /// Add packages to package.json and install them.
     Add {
         #[arg(required = true)]
         packages: Vec<String>,
-        #[arg(short = 'D', long)]
-        dev: bool,
-        /// Save the exact resolved version instead of a caret range.
-        #[arg(short = 'E', long)]
-        exact: bool,
+        #[command(flatten)]
+        save: SaveFlags,
         /// Run no lifecycle scripts.
         #[arg(long)]
         ignore_scripts: bool,
     },
+    /// Remove packages from package.json and node_modules.
+    #[command(visible_aliases = ["rm", "uninstall", "un"])]
     Remove {
         #[arg(required = true)]
         packages: Vec<String>,
     },
+    /// Run a package.json script, or list them when no name is given.
     Run {
-        script: String,
+        script: Option<String>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Manage the global package store and metadata cache.
     Cache {
         #[command(subcommand)]
         command: CacheCommands,
     },
+    /// Create a package.json in the current directory.
+    Init,
+    /// Run the `start` script.
     Start,
+    /// Run the `test` script.
+    #[command(visible_alias = "t")]
     Test,
+    /// Install the project's dependencies; with package names, add them like `craft add`.
+    #[command(visible_alias = "i")]
     Install {
+        packages: Vec<String>,
+        #[command(flatten)]
+        save: SaveFlags,
         /// Install exactly what craft.lock records; fail if it is missing or out of date.
         /// On by default when the CI environment variable is set.
         #[arg(long)]
@@ -75,9 +89,22 @@ pub enum Commands {
     External(Vec<String>),
 }
 
+/// How added packages are saved to package.json.
+#[derive(Args, Debug, PartialEq, Clone, Copy, Default)]
+pub struct SaveFlags {
+    /// Save to devDependencies.
+    #[arg(short = 'D', long)]
+    pub dev: bool,
+    /// Save the exact resolved version instead of a caret range.
+    #[arg(short = 'E', long)]
+    pub exact: bool,
+}
+
 #[derive(Subcommand, Debug, PartialEq, Clone)]
 pub enum CacheCommands {
+    /// Remove every stored package and cached registry response.
     Clean {
+        /// Confirm the removal.
         #[arg(short, long)]
         force: bool,
     },
@@ -90,7 +117,7 @@ impl Display for Commands {
 }
 
 /// A command with its shortcuts resolved: `start`, `test` and unknown subcommands become `Run`,
-/// and no command becomes `Install`.
+/// `install <pkg>` becomes `Add`, and no command becomes `Install`.
 #[derive(Debug, PartialEq)]
 pub enum Action {
     Add {
@@ -106,9 +133,11 @@ pub enum Action {
         script: String,
         args: Vec<String>,
     },
+    ListScripts,
     Cache {
         command: CacheCommands,
     },
+    Init,
     Install {
         frozen_lockfile: bool,
         ignore_scripts: bool,
@@ -125,39 +154,39 @@ impl Cli {
 
     pub fn normalize(&self) -> Action {
         let Some(command) = &self.command else {
-            return Action::Install {
-                frozen_lockfile: false,
-                ignore_scripts: false,
-            };
+            return default_install();
         };
 
         match command {
             Commands::Add {
                 packages,
-                dev,
-                exact,
+                save,
                 ignore_scripts,
-            } => Action::Add {
-                packages: packages.clone(),
-                dev: *dev,
-                exact: *exact,
-                ignore_scripts: *ignore_scripts,
-            },
+            } => add(packages, save, *ignore_scripts),
             Commands::Remove { packages } => Action::Remove {
                 packages: packages.clone(),
             },
-            Commands::Run { script, args } => Action::Run {
-                script: script.clone(),
-                args: args.clone(),
-            },
+            Commands::Run {
+                script: Some(script),
+                args,
+            } => run_script(script, args),
+            Commands::Run { script: None, .. } => Action::ListScripts,
             Commands::Cache { command } => Action::Cache {
                 command: command.clone(),
             },
+            Commands::Init => Action::Init,
             Commands::Start => run_script("start", &[]),
             Commands::Test => run_script("test", &[]),
             Commands::Install {
+                packages,
+                save,
+                ignore_scripts,
+                ..
+            } if !packages.is_empty() => add(packages, save, *ignore_scripts),
+            Commands::Install {
                 frozen_lockfile,
                 ignore_scripts,
+                ..
             } => Action::Install {
                 frozen_lockfile: *frozen_lockfile,
                 ignore_scripts: *ignore_scripts,
@@ -167,12 +196,25 @@ impl Cli {
             },
             Commands::External(args) => match args.split_first() {
                 Some((script, args)) => run_script(script, args),
-                None => Action::Install {
-                    frozen_lockfile: false,
-                    ignore_scripts: false,
-                },
+                None => default_install(),
             },
         }
+    }
+}
+
+fn add(packages: &[String], save: &SaveFlags, ignore_scripts: bool) -> Action {
+    Action::Add {
+        packages: packages.to_vec(),
+        dev: save.dev,
+        exact: save.exact,
+        ignore_scripts,
+    }
+}
+
+fn default_install() -> Action {
+    Action::Install {
+        frozen_lockfile: false,
+        ignore_scripts: false,
     }
 }
 
@@ -191,9 +233,9 @@ mod tests {
     fn test_add_packages() {
         let cli = Cli::parse_from(["craft", "add", "react", "express"]);
         match cli.command {
-            Some(Commands::Add { packages, dev, .. }) => {
+            Some(Commands::Add { packages, save, .. }) => {
                 assert_eq!(packages, vec!["react", "express"]);
-                assert!(!dev);
+                assert!(!save.dev);
             }
             _ => panic!("Expected Add command"),
         }
@@ -217,9 +259,9 @@ mod tests {
     fn test_add_dev_dependency() {
         let cli = Cli::parse_from(["craft", "add", "typescript", "-D"]);
         match cli.command {
-            Some(Commands::Add { packages, dev, .. }) => {
+            Some(Commands::Add { packages, save, .. }) => {
                 assert_eq!(packages, vec!["typescript"]);
-                assert!(dev);
+                assert!(save.dev);
             }
             _ => panic!("Expected Add command"),
         }
@@ -241,7 +283,7 @@ mod tests {
         let cli = Cli::parse_from(["craft", "run", "build"]);
         match cli.command {
             Some(Commands::Run { script, args }) => {
-                assert_eq!(script, "build");
+                assert_eq!(script.as_deref(), Some("build"));
                 assert!(args.is_empty());
             }
             _ => panic!("Expected Run command"),
