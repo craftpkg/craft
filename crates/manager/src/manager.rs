@@ -1,7 +1,7 @@
 use actor::{
     AddActorPayload, AddPackageActor, CleanCacheActor, CleanCacheActorPayload, InitActor,
     InspectActor, InspectPayload, InstallActor, InstallOptions, ListScriptsActor,
-    RemoveActorPayload, RemovePackageActor, RunScriptActor, RunScriptActorPayload,
+    RemoveActorPayload, RemovePackageActor, RunScriptActor, RunScriptActorPayload, TrustActor,
 };
 use cli::{Action, CacheCommands};
 use contract::{Actor, Context};
@@ -23,6 +23,8 @@ impl CraftManager {
                 packages,
                 dev,
                 exact,
+                optional,
+                peer,
                 ignore_scripts,
             } => {
                 AddPackageActor::with(
@@ -31,6 +33,8 @@ impl CraftManager {
                         packages,
                         is_dev: dev,
                         is_exact: exact,
+                        is_optional: optional,
+                        is_peer: peer,
                         ignore_scripts,
                     },
                 )
@@ -49,6 +53,7 @@ impl CraftManager {
             }
             Action::ListScripts => ListScriptsActor::with(context, ()).run().await,
             Action::Init => InitActor::with(context, ()).run().await,
+            Action::Trust { packages } => TrustActor::with(context, packages).run().await,
             Action::List { depth } => {
                 InspectActor::with(context, InspectPayload::List { depth })
                     .run()
@@ -69,11 +74,13 @@ impl CraftManager {
             Action::Install {
                 frozen_lockfile,
                 ignore_scripts,
+                production,
             } => {
                 let options = InstallOptions {
                     frozen_lockfile,
                     clean: false,
                     ignore_scripts,
+                    production,
                 };
                 InstallActor::with(context, options).run().await
             }
@@ -82,6 +89,7 @@ impl CraftManager {
                     frozen_lockfile: true,
                     clean: true,
                     ignore_scripts,
+                    production: false,
                 };
                 InstallActor::with(context, options).run().await
             }
@@ -143,6 +151,7 @@ mod tests {
             .handle_command(Action::Install {
                 frozen_lockfile: false,
                 ignore_scripts: false,
+                production: false,
             })
             .await;
 
