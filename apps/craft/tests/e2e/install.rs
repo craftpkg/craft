@@ -506,7 +506,6 @@ fn keeps_bin_links_inside_node_modules_bin() {
 }
 
 #[test]
-#[ignore = "fixed by 2.3: peer dependencies are never linked"]
 fn resolves_peer_dependencies_from_the_project() {
     let registry = MockRegistry::start();
     registry
