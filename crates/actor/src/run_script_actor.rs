@@ -111,7 +111,7 @@ impl RunScriptActor {
                 continue;
             };
             let command = if event == name {
-                with_quoted_args(script, &self.payload.args)
+                process::with_args(script, &self.payload.args, &self.context.cwd)
             } else {
                 script.clone()
             };
@@ -166,36 +166,8 @@ fn find_bin(cwd: &Path, name: &str) -> Option<PathBuf> {
     }
 
     cwd.ancestors()
-        .map(|dir| dir.join("node_modules").join(".bin").join(name))
+        .map(|dir| fsutil::bin_command(&dir.join("node_modules").join(".bin"), name))
         .find(|bin| bin.is_file())
-}
-
-fn with_quoted_args(script: &str, args: &[String]) -> String {
-    let mut command = script.to_string();
-    for arg in args {
-        command.push(' ');
-        command.push_str(&quote(arg));
-    }
-    command
-}
-
-/// Quotes an argument for `sh` so it reaches the script as one word, with no expansion.
-#[cfg(unix)]
-fn quote(arg: &str) -> String {
-    let is_plain = !arg.is_empty()
-        && arg
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "-_./:=@%+,".contains(c));
-    if is_plain {
-        return arg.to_string();
-    }
-    format!("'{}'", arg.replace('\'', r"'\''"))
-}
-
-/// Quotes an argument for `cmd`; full metacharacter escaping is part of Windows support (6.4).
-#[cfg(windows)]
-fn quote(arg: &str) -> String {
-    format!("\"{}\"", arg.replace('"', "\"\""))
 }
 
 #[cfg(test)]
@@ -227,26 +199,19 @@ mod tests {
         assert_eq!(actor.payload.args, vec!["test"]);
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn test_args_are_quoted_for_the_shell() {
-        let args = ["plain-arg_1.js", "a; echo INJECTED", "it's", "", "$HOME"].map(String::from);
-        assert_eq!(
-            with_quoted_args("echo", &args),
-            r"echo plain-arg_1.js 'a; echo INJECTED' 'it'\''s' '' '$HOME'"
-        );
-    }
-
     #[test]
     fn test_find_bin_searches_ancestors_and_rejects_paths() {
         let dir = tempfile::tempdir().unwrap();
         let bin_dir = dir.path().join("node_modules/.bin");
         std::fs::create_dir_all(&bin_dir).unwrap();
-        std::fs::write(bin_dir.join("tsc"), "").unwrap();
+        std::fs::write(fsutil::bin_command(&bin_dir, "tsc"), "").unwrap();
         let nested = dir.path().join("packages/web");
         std::fs::create_dir_all(&nested).unwrap();
 
-        assert_eq!(find_bin(&nested, "tsc"), Some(bin_dir.join("tsc")));
+        assert_eq!(
+            find_bin(&nested, "tsc"),
+            Some(fsutil::bin_command(&bin_dir, "tsc"))
+        );
         assert_eq!(find_bin(&nested, "eslint"), None);
         assert_eq!(find_bin(&nested, "../.bin/tsc"), None);
     }
