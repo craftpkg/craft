@@ -388,7 +388,6 @@ fn replaces_a_corrupted_cached_tarball() {
 }
 
 #[test]
-#[ignore = "fixed by 1.8: a dangling symlink in node_modules fails the install with EEXIST"]
 fn replaces_dangling_symlinks_in_node_modules() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("ms", "2.1.3"));
@@ -399,6 +398,27 @@ fn replaces_dangling_symlinks_in_node_modules() {
     project.craft().arg("install").assert().success();
 
     assert_eq!(project.required_version("ms"), Ok("2.1.3".to_string()));
+}
+
+#[test]
+fn replaces_a_dangling_bin_directory() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("cowsay", "1.6.0").bin("cowsay", "cli.js"));
+    let project = Project::new(&registry, json!({ "dependencies": { "cowsay": "^1.0.0" } }));
+    std::fs::create_dir_all(project.path().join("node_modules")).expect("create node_modules");
+    symlink_dir(
+        "/nonexistent/bin",
+        &project.path().join("node_modules/.bin"),
+    );
+
+    project.craft().arg("install").assert().success();
+
+    let bin = project.path().join("node_modules/.bin/cowsay");
+    assert_eq!(
+        std::fs::read_link(&bin).expect("cowsay bin is a link"),
+        std::path::PathBuf::from("../cowsay/cli.js")
+    );
+    assert!(bin.exists());
 }
 
 #[test]
@@ -506,7 +526,6 @@ fn reuses_extracted_packages_without_downloading_again() {
 }
 
 #[test]
-#[ignore = "fixed by 2.2: installs sharing a craft home race on the global cache"]
 fn concurrent_installs_sharing_a_craft_home_succeed() {
     let registry = MockRegistry::start();
     registry
