@@ -84,6 +84,18 @@ pub enum ScriptError {
     #[error("{name} exited with code {code}")]
     Failed { name: String, code: i32 },
 
+    #[error(
+        "no {name} in node_modules/.bin; add the package that provides it, or try `craft dlx {name}`"
+    )]
+    BinNotFound { name: String },
+
+    #[error("{package} has no bin named {name}; it provides: {}", .available.join(", "))]
+    NoSuchBin {
+        package: String,
+        name: String,
+        available: Vec<String>,
+    },
+
     #[error("{event} script of {package} failed with exit code {code}:\n{output}")]
     InstallFailed {
         package: String,
