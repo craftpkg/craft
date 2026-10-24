@@ -32,10 +32,8 @@ impl Actor<()> for InstallActor {
         debug::trace!("Installing packages from package.json: {pkgs:?}");
 
         // Run install and link pipes
-        let artifacts = InstallPipe::new(&self.context, pkgs.clone()).run().await?;
-        LinkerPipe::new(&self.context, artifacts, pkgs)
-            .run()
-            .await?;
+        let installation = InstallPipe::new(&self.context, pkgs).run().await?;
+        LinkerPipe::new(&self.context, installation).run().await?;
 
         Ok(())
     }
