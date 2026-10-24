@@ -82,6 +82,12 @@ impl Project {
         for proxy_var in PROXY_VARS {
             command.env_remove(proxy_var);
         }
+        let npm_config_vars = std::env::vars()
+            .map(|(key, _)| key)
+            .filter(|key| key.to_ascii_lowercase().starts_with("npm_config_"));
+        for npm_config_var in npm_config_vars {
+            command.env_remove(npm_config_var);
+        }
         command
     }
 
