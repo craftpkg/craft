@@ -386,6 +386,7 @@ dependencies = [
  "cli",
  "contract",
  "debug",
+ "fsutil",
  "manager",
  "predicates",
  "progress",
@@ -548,6 +549,7 @@ dependencies = [
 name = "fsutil"
 version = "0.1.0"
 dependencies = [
+ "junction",
  "reflink-copy",
  "tempfile",
  "tokio",
@@ -963,6 +965,16 @@ checksum = "b011eec8cc36da2aab2d5cff675ec18454fad408585853910a202391cf9f8e65"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "junction"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cfc352a66ba903c23239ef51e809508b6fc2b0f90e3476ac7a9ff47e863ae95"
+dependencies = [
+ "scopeguard",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
