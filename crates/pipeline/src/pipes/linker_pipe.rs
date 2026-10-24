@@ -2,10 +2,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
-use contract::{Context, Pipeline, Result};
+use contract::{Context, Pipeline, PlatformError, Result};
 use futures::stream::{self, StreamExt};
 use node_semver::Version;
-use resolver::{ArtifactSource, Edge, NodeId, ResolutionGraph, ResolvedNode};
+use resolver::{ArtifactSource, DependencyKind, Edge, NodeId, ResolutionGraph, ResolvedNode};
 use tokio::fs;
 
 use super::bins::package_bins;
@@ -38,6 +38,9 @@ impl LinkerPipe {
     /// Imports a package into its virtual store entry: store entries once (they never change),
     /// `file:` directories afresh from their source every install, `link:` targets not at all.
     async fn import_package(&self, node_id: &NodeId, node: &ResolvedNode) -> Result<()> {
+        if !self.supports(node) {
+            return Ok(());
+        }
         let dest = self.store.package_dir(node_id, &node.artifact);
         let imported = match &node.artifact.source {
             ArtifactSource::Link { .. } => return Ok(()),
@@ -60,6 +63,9 @@ impl LinkerPipe {
         for edge in &node.dependencies {
             let is_self_reference = edge.name == node.artifact.name;
             if is_self_reference {
+                continue;
+            }
+            if !self.is_installable(edge, &node_id.to_string())? {
                 continue;
             }
             self.link_edge(edge, &modules_dir).await?;
@@ -100,7 +106,12 @@ impl LinkerPipe {
         }
 
         let hoist_dir = self.store.hoist_dir();
-        for (name, edge) in hoisted {
+        let installed = hoisted.into_iter().filter(|(_, edge)| {
+            self.graph
+                .target(edge)
+                .is_ok_and(|node| self.supports(node))
+        });
+        for (name, edge) in installed {
             let package_dir = self.target_dir(edge)?;
             self.link_dir(&package_dir, &hoist_dir.join(name)).await?;
         }
@@ -116,7 +127,11 @@ impl LinkerPipe {
         let mut owners: HashMap<String, &str> = HashMap::new();
 
         for edge in edges {
-            let artifact = &self.graph.target(edge)?.artifact;
+            let target = self.graph.target(edge)?;
+            if !self.supports(target) {
+                continue;
+            }
+            let artifact = &target.artifact;
             let Some(manifest) = &artifact.package else {
                 continue;
             };
@@ -140,6 +155,28 @@ impl LinkerPipe {
             }
         }
         Ok(())
+    }
+
+    fn supports(&self, node: &ResolvedNode) -> bool {
+        node.artifact.platform.supports(&self.context.platform)
+    }
+
+    /// Whether `edge`'s package is installed here: packages for other platforms are skipped,
+    /// which is only allowed for optional dependencies.
+    fn is_installable(&self, edge: &Edge, dependent: &str) -> Result<bool> {
+        let target = self.graph.target(edge)?;
+        if self.supports(target) {
+            return Ok(true);
+        }
+        if edge.kind == DependencyKind::Optional {
+            return Ok(false);
+        }
+        Err(PlatformError::Unsupported {
+            package: edge.target.to_string(),
+            platform: self.context.platform.to_string(),
+            dependent: dependent.to_string(),
+        }
+        .into())
     }
 
     fn target_dir(&self, edge: &Edge) -> Result<PathBuf> {
@@ -194,10 +231,14 @@ impl Pipeline<()> for LinkerPipe {
         self.hoist().await?;
 
         let node_modules = &node_modules;
+        let mut roots = Vec::new();
+        for root in &self.graph.roots {
+            if self.is_installable(root, "the project")? {
+                roots.push(root.clone());
+            }
+        }
         run_all(
-            self.graph
-                .roots
-                .clone()
+            roots
                 .into_iter()
                 .map(|root| async move { self.link_edge(&root, node_modules).await }),
         )
@@ -277,6 +318,7 @@ mod tests {
                 tarball_url: "http://example.com".to_string(),
             },
             integrity: None,
+            platform: Default::default(),
             package: Some(pkg_json),
         };
 
