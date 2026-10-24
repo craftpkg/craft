@@ -1,11 +1,11 @@
 use contract::{Actor, Context, Pipeline};
 use lockfile::Lockfile;
-use package::{DependencySection, InstallPackage, PackageJson, ProjectManifest};
+use package::{DependencySection, DependencySpec, InstallPackage, PackageJson, ProjectManifest};
 use pipeline::{InstallPipe, LinkerPipe};
 use resolver::{ArtifactSource, Edge, ResolvedArtifact};
 
 use crate::install_actor::{manifest_packages, manifest_specifiers};
-use crate::lock_state::{save_lockfile, with_lock_preference};
+use crate::lock_state::{InstallMode, save_lockfile, with_lock_preference};
 use crate::scripts::{run_install_scripts, script_policy};
 use crate::summary::{report_changes, report_installed};
 use std::time::Instant;
@@ -15,6 +15,9 @@ pub struct AddActorPayload {
     pub packages: Vec<String>,
     pub is_dev: bool,
     pub is_exact: bool,
+    pub is_optional: bool,
+    /// Saved to `peerDependencies`, and to `devDependencies` so it is installed for development.
+    pub is_peer: bool,
     pub ignore_scripts: bool,
 }
 
@@ -47,50 +50,92 @@ impl Actor<AddActorPayload> for AddPackageActor {
             .payload
             .packages
             .iter()
-            .map(|literal| {
-                InstallPackage::from_literal(literal, self.payload.is_dev).without_lock()
-            })
+            .map(|literal| self.added_package(literal))
             .collect();
         let existing: Vec<InstallPackage> = manifest_packages(&package_json)
             .into_iter()
             .filter(|package| !added.iter().any(|added| added.name == package.name))
             .map(|package| with_lock_preference(lockfile.as_ref(), package))
             .collect();
-        let existing_count = existing.len();
 
-        let mut graph = InstallPipe::new(&self.context, [existing, added].concat())
+        let mut graph = InstallPipe::new(&self.context, [existing, added.clone()].concat())
             .with_lockfile(lockfile.as_ref())
             .run()
             .await?;
-        let added_roots = graph.roots.split_off(existing_count);
-        graph
-            .roots
-            .retain(|root| !added_roots.iter().any(|added| added.name == root.name));
+        let added_roots: Vec<Edge> = added
+            .iter()
+            .filter_map(|package| root_for(&graph.roots, package).cloned())
+            .collect();
+        graph.roots.retain(|root| {
+            let is_replaced = added_roots.iter().any(|added| added.name == root.name);
+            !is_replaced
+        });
         graph.roots.extend(added_roots.iter().cloned());
         LinkerPipe::new(&self.context, graph.clone()).run().await?;
         let policy = script_policy(&package_json, self.payload.ignore_scripts);
         run_install_scripts(&self.context, graph.clone(), &package_json, &policy, false).await?;
 
-        let section = if self.payload.is_dev {
-            DependencySection::DevDependencies
-        } else {
-            DependencySection::Dependencies
-        };
         let mut specifiers = manifest_specifiers(&package_json);
         for root in &added_roots {
             let spec = saved_spec(root, &graph.target(root)?.artifact, self.payload.is_exact);
             debug::info!("Saving {}@{}", root.name, spec);
-            save_dependency(&mut manifest, section, &root.name, &spec);
+            save_dependency(&mut manifest, self.section(), &root.name, &spec);
+            if self.payload.is_peer {
+                manifest.set_dependency(DependencySection::PeerDependencies, &root.name, &spec);
+            }
             specifiers.insert(root.name.clone(), spec);
         }
 
         manifest.save().await?;
         debug::info!("Updated package.json");
-        let installed_lockfile = save_lockfile(&self.context, &graph, &specifiers, &policy).await?;
+        let mode = InstallMode {
+            policy: &policy,
+            production: false,
+        };
+        let installed_lockfile = save_lockfile(&self.context, &graph, &specifiers, &mode).await?;
         report_changes(&self.context, lockfile.as_ref(), &installed_lockfile);
         report_installed(&self.context, &graph, started);
         Ok(())
     }
+}
+
+impl AddPackageActor {
+    fn added_package(&self, literal: &str) -> InstallPackage {
+        let installs_for_development = self.payload.is_dev || self.payload.is_peer;
+        let package =
+            InstallPackage::from_literal(literal, installs_for_development).without_lock();
+        if self.payload.is_optional {
+            package.optional()
+        } else {
+            package
+        }
+    }
+
+    fn section(&self) -> DependencySection {
+        if self.payload.is_optional {
+            DependencySection::OptionalDependencies
+        } else if self.payload.is_dev || self.payload.is_peer {
+            DependencySection::DevDependencies
+        } else {
+            DependencySection::Dependencies
+        }
+    }
+}
+
+/// The root edge an added package resolved to: matched by name and spec, or for a bare
+/// location such as `./libs/x` by the location it is saved under, since its name comes from
+/// the package found there.
+fn root_for<'g>(roots: &'g [Edge], package: &InstallPackage) -> Option<&'g Edge> {
+    let location = package
+        .version
+        .is_none()
+        .then(|| DependencySpec::parse(&package.name, None).ok())
+        .flatten()
+        .and_then(|spec| spec.location_spec());
+    roots.iter().find(|root| match &location {
+        Some(location) => root.spec.as_ref() == Some(location),
+        None => root.name == package.name && root.spec == package.version,
+    })
 }
 
 /// The spec written to package.json, as npm saves it: a caret range on the resolved version (or
@@ -127,7 +172,7 @@ fn save_dependency(
     name: &str,
     spec: &str,
 ) {
-    for other_section in DependencySection::ALL {
+    for other_section in DependencySection::INSTALLED {
         if other_section != section {
             manifest.remove_dependency(other_section, name);
         }
@@ -145,6 +190,8 @@ mod tests {
             packages: vec!["react".to_string(), "lodash".to_string()],
             is_dev: false,
             is_exact: false,
+            is_optional: false,
+            is_peer: false,
             ignore_scripts: false,
         };
 
@@ -157,6 +204,8 @@ mod tests {
             packages: vec!["test".to_string()],
             is_dev: true,
             is_exact: false,
+            is_optional: false,
+            is_peer: false,
             ignore_scripts: false,
         };
 
