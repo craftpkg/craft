@@ -52,7 +52,6 @@ fn adds_several_packages_including_scoped_ones() {
 }
 
 #[test]
-#[ignore = "fixed by 1.9: a version spec in craft add skips the package.json update"]
 fn saves_a_dependency_added_with_a_version_spec() {
     let registry = MockRegistry::start();
     registry
@@ -67,7 +66,6 @@ fn saves_a_dependency_added_with_a_version_spec() {
 }
 
 #[test]
-#[ignore = "fixed by 1.1: craft add with a dist-tag panics"]
 fn adds_a_package_by_dist_tag() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("ms", "2.1.3"));
