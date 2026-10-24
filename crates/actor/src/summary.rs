@@ -52,15 +52,14 @@ pub(crate) fn packages(count: usize) -> String {
 
 struct DirectDependency {
     version: String,
-    is_dev: bool,
+    label: Option<&'static str>,
 }
 
 impl DirectDependency {
     fn describe(&self) -> String {
-        if self.is_dev {
-            format!("{} (dev)", self.version)
-        } else {
-            self.version.clone()
+        match self.label {
+            Some(label) => format!("{} ({label})", self.version),
+            None => self.version.clone(),
         }
     }
 }
@@ -69,16 +68,20 @@ fn direct_dependencies(lockfile: &Lockfile) -> BTreeMap<String, DirectDependency
     let Some(root) = lockfile.root() else {
         return BTreeMap::new();
     };
-    let sections = [(&root.dependencies, false), (&root.dev_dependencies, true)];
+    let sections = [
+        (&root.dependencies, None),
+        (&root.dev_dependencies, Some("dev")),
+        (&root.optional_dependencies, Some("optional")),
+    ];
     sections
         .into_iter()
-        .flat_map(|(section, is_dev)| section.iter().map(move |entry| (entry, is_dev)))
-        .map(|((name, locked), is_dev)| {
+        .flat_map(|(section, label)| section.iter().map(move |entry| (entry, label)))
+        .map(|((name, locked), label)| {
             let version = lockfile
                 .packages
                 .get(&locked.version)
                 .map_or_else(|| locked.version.clone(), |package| package.version.clone());
-            (name.clone(), DirectDependency { version, is_dev })
+            (name.clone(), DirectDependency { version, label })
         })
         .collect()
 }
