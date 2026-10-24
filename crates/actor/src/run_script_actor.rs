@@ -1,4 +1,8 @@
-use contract::{Actor, Context, Result};
+use std::collections::HashMap;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+use contract::{Actor, CRAFT_VERSION, Context, PackageError, Result, ScriptError};
 use package::PackageJson;
 use process::Process;
 
@@ -19,53 +23,180 @@ pub struct RunScriptActor {
     payload: RunScriptActorPayload,
 }
 
-impl RunScriptActor {
-    async fn lookup_script(&self) -> Result<String> {
-        let mut script = self.payload.script.clone();
-        let package_json = PackageJson::from_file(&self.context.package_json_path()).await?;
-
-        if let Some(scripts) = package_json.scripts
-            && let Some(package_script) = scripts.get(&script)
-        {
-            script = package_script.clone();
-        } else {
-            // Check if it exists in node_modules/.bin
-            let bin_path = self.context.node_modules_dir().join(".bin").join(&script);
-
-            if bin_path.exists() {
-                script = bin_path.to_string_lossy().to_string();
-            }
-        }
-
-        Ok(script)
-    }
-}
-
 impl Actor<RunScriptActorPayload> for RunScriptActor {
     fn with(context: Context, payload: RunScriptActorPayload) -> Self {
         Self { context, payload }
     }
 
-    async fn run(&self) -> contract::Result<()> {
-        debug::info!("Running script: {}", self.payload.script);
-        let script = self.lookup_script().await?;
+    /// Runs the named package.json script with its `pre`/`post` scripts, or else a dependency
+    /// bin of that name, the way `npm run` and `npx` resolve them.
+    async fn run(&self) -> Result<()> {
+        let name = &self.payload.script;
+        let manifest = read_manifest(&self.context.package_json_path()).await?;
+        let scripts = manifest
+            .as_ref()
+            .and_then(|manifest| manifest.scripts.clone())
+            .unwrap_or_default();
 
-        let mut command_with_args = script;
-
-        if !self.payload.args.is_empty() {
-            command_with_args.push(' ');
-            command_with_args.push_str(&self.payload.args.join(" "));
+        if scripts.contains_key(name) {
+            return self.run_lifecycle(name, &scripts, manifest.as_ref()).await;
+        }
+        if let Some(bin) = find_bin(&self.context.cwd, name) {
+            debug::info!("Running bin {}", bin.display());
+            let process = Process::new(&bin).args(&self.payload.args);
+            return self.run_process(name, process, manifest.as_ref()).await;
         }
 
-        Process::run_script(
-            &command_with_args,
-            Some(self.context.cwd.to_str().unwrap_or(".")),
-        )
-        .await?;
+        let mut available: Vec<String> = scripts.into_keys().collect();
+        available.sort();
+        Err(ScriptError::NotFound {
+            name: name.clone(),
+            available,
+        }
+        .into())
+    }
+}
 
-        debug::info!("Script completed successfully");
+impl RunScriptActor {
+    /// Runs `pre<name>`, `<name>` and `post<name>`, stopping at the first failure. Only the
+    /// main script receives the command-line arguments.
+    async fn run_lifecycle(
+        &self,
+        name: &str,
+        scripts: &HashMap<String, String>,
+        manifest: Option<&PackageJson>,
+    ) -> Result<()> {
+        let events = [
+            format!("pre{name}"),
+            name.to_string(),
+            format!("post{name}"),
+        ];
+
+        for event in events {
+            let Some(script) = scripts.get(&event) else {
+                continue;
+            };
+            let command = if event == name {
+                with_quoted_args(script, &self.payload.args)
+            } else {
+                script.clone()
+            };
+
+            debug::info!("Running {}: {}", event, command);
+            let process = Process::shell(&command)
+                .env("npm_lifecycle_event", &event)
+                .env("npm_lifecycle_script", script);
+            self.run_process(&event, process, manifest).await?;
+        }
         Ok(())
     }
+
+    async fn run_process(
+        &self,
+        name: &str,
+        process: Process,
+        manifest: Option<&PackageJson>,
+    ) -> Result<()> {
+        let mut process = process
+            .current_dir(&self.context.cwd)
+            .env("PATH", script_path(&self.context.cwd)?)
+            .env("INIT_CWD", &self.context.cwd)
+            .env("npm_config_user_agent", user_agent())
+            .env("npm_package_json", self.context.package_json_path());
+        if let Some(manifest) = manifest {
+            if let Some(package_name) = &manifest.name {
+                process = process.env("npm_package_name", package_name);
+            }
+            if let Some(version) = &manifest.version {
+                process = process.env("npm_package_version", version);
+            }
+        }
+
+        let code = process.run().await?;
+        if code != 0 {
+            return Err(ScriptError::Failed {
+                name: name.to_string(),
+                code,
+            }
+            .into());
+        }
+        Ok(())
+    }
+}
+
+async fn read_manifest(package_json_path: &Path) -> Result<Option<PackageJson>> {
+    match PackageJson::from_file(package_json_path).await {
+        Ok(manifest) => Ok(Some(manifest)),
+        Err(error) if matches!(error.downcast_ref(), Some(PackageError::NoPackageJson)) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// The nearest `node_modules/.bin/<name>`, searching from `cwd` up through its ancestors.
+fn find_bin(cwd: &Path, name: &str) -> Option<PathBuf> {
+    let is_plain_name = !name.is_empty() && !name.contains(['/', '\\']) && name != "..";
+    if !is_plain_name {
+        return None;
+    }
+
+    cwd.ancestors()
+        .map(|dir| dir.join("node_modules").join(".bin").join(name))
+        .find(|bin| bin.is_file())
+}
+
+/// `PATH` with every `node_modules/.bin` from `cwd` up to the root in front, as npm sets it.
+fn script_path(cwd: &Path) -> Result<OsString> {
+    let bin_dirs = cwd
+        .ancestors()
+        .map(|dir| dir.join("node_modules").join(".bin"));
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(bin_dirs.chain(std::env::split_paths(&inherited)))?;
+    Ok(path)
+}
+
+fn with_quoted_args(script: &str, args: &[String]) -> String {
+    let mut command = script.to_string();
+    for arg in args {
+        command.push(' ');
+        command.push_str(&quote(arg));
+    }
+    command
+}
+
+/// Quotes an argument for `sh` so it reaches the script as one word, with no expansion.
+#[cfg(unix)]
+fn quote(arg: &str) -> String {
+    let is_plain = !arg.is_empty()
+        && arg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_./:=@%+,".contains(c));
+    if is_plain {
+        return arg.to_string();
+    }
+    format!("'{}'", arg.replace('\'', r"'\''"))
+}
+
+/// Quotes an argument for `cmd`; full metacharacter escaping is part of Windows support (6.4).
+#[cfg(windows)]
+fn quote(arg: &str) -> String {
+    format!("\"{}\"", arg.replace('"', "\"\""))
+}
+
+/// npm's format (`<manager>/<version> <platform> <arch>`), which tools read to detect the
+/// package manager that started them.
+fn user_agent() -> String {
+    let platform = match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "win32",
+        other => other,
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        "x86" => "ia32",
+        other => other,
+    };
+    format!("craft/{CRAFT_VERSION} {platform} {arch}")
 }
 
 #[cfg(test)]
@@ -95,7 +226,46 @@ mod tests {
         assert_eq!(actor.payload.args, vec!["test"]);
     }
 
-    // Note: Integration tests that change current_dir are disabled because
-    // they interfere with parallel test execution. The script lookup and
-    // execution logic is tested through the CLI integration and manual testing.
+    #[cfg(unix)]
+    #[test]
+    fn test_args_are_quoted_for_the_shell() {
+        let args = ["plain-arg_1.js", "a; echo INJECTED", "it's", "", "$HOME"].map(String::from);
+        assert_eq!(
+            with_quoted_args("echo", &args),
+            r"echo plain-arg_1.js 'a; echo INJECTED' 'it'\''s' '' '$HOME'"
+        );
+    }
+
+    #[test]
+    fn test_path_starts_with_bin_dirs_from_cwd_up() {
+        let path = script_path(Path::new("/work/app")).unwrap();
+        let entries: Vec<PathBuf> = std::env::split_paths(&path).take(3).collect();
+        assert_eq!(
+            entries,
+            [
+                PathBuf::from("/work/app/node_modules/.bin"),
+                PathBuf::from("/work/node_modules/.bin"),
+                PathBuf::from("/node_modules/.bin"),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_find_bin_searches_ancestors_and_rejects_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("node_modules/.bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        std::fs::write(bin_dir.join("tsc"), "").unwrap();
+        let nested = dir.path().join("packages/web");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        assert_eq!(find_bin(&nested, "tsc"), Some(bin_dir.join("tsc")));
+        assert_eq!(find_bin(&nested, "eslint"), None);
+        assert_eq!(find_bin(&nested, "../.bin/tsc"), None);
+    }
+
+    #[test]
+    fn test_user_agent_names_craft() {
+        assert!(user_agent().starts_with(&format!("craft/{CRAFT_VERSION} ")));
+    }
 }
