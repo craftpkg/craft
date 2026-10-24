@@ -810,6 +810,7 @@ dependencies = [
  "contract",
  "debug",
  "package",
+ "serde_json",
  "tempfile",
  "tokio",
 ]
