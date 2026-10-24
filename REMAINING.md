@@ -66,7 +66,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | **Phase 4 — Platform packages & lifecycle scripts** | | | |
 | 4.1 | `optionalDependencies` | P0 | [x] |
 | 4.2 | `os` / `cpu` / `libc` filtering | P0 | [x] |
-| 4.3 | Lifecycle scripts with an allowlist | P0 | [ ] |
+| 4.3 | Lifecycle scripts with an allowlist | P0 | [x] |
 | **Phase 5 — Network & performance** | | | |
 | 5.1 | Abbreviated packuments | P2 | [ ] |
 | 5.2 | Memoize packument fetches per package name | P2 | [ ] |
@@ -615,7 +615,9 @@ README says "`package-lock.json` support (coming soon)" — decide whether that 
 - `libc` (`glibc`/`musl`) detection on Linux.
 - Lockfile keeps all platform variants so it's portable across machines; filtering happens at link time.
 
-### 4.3 Lifecycle scripts with an allowlist · P0
+### 4.3 Lifecycle scripts with an allowlist · P0 — ✔ done
+
+> Done (decided: deny by default, top-level `trustedDependencies` as in Bun): `pipeline::LifecyclePipe` runs `preinstall` / `install` / `postinstall` (and an implicit `node-gyp rebuild` for a `binding.gyp` without an install script) only for packages named in package.json `trustedDependencies`; every other package with scripts is listed after the install with how to trust it. Builds run once per virtual store entry (a `.built` marker; a failed build removes the entry so the next install retries), dependencies before dependents (by depth, cycles cut), up to 8 in parallel, with output captured and shown on failure or with `--verbose`. Before its first build a package is re-imported by copy, so scripts never write through hardlinks into the store. Scripts get the `craft run` environment (`process::script_env`: every `node_modules/.bin` upwards on `PATH`, `npm_*`, `INIT_CWD`). A failing build of a package reached only through optional dependencies is a warning; otherwise the install fails with the script's output. The project's own `preinstall` / `install` / `postinstall` / `prepare` run after dependencies on `craft install` / `craft ci`. `--ignore-scripts` (install, add, ci) disables all of it. The script policy is part of the installed state, so trusting a package makes the next `craft install` build it. Verified: `bcrypt` builds and hashes; untrusted `esbuild` is reported and still works through its platform binary. Not done: `prepare` for git dependencies, a `craft trust` command, and Bun's default-trusted list.
 
 - Dependency scripts: `preinstall`, `install`, `postinstall` (and implicit `node-gyp rebuild` when `binding.gyp` exists and there's no `install`/`preinstall`), run after linking in **dependency order** (deps before dependents), with the virtual-store `.bin` on `PATH` and `npm_*` env (reuse 1.12).
 - Root project: `preinstall`, `install`, `postinstall`, `prepare`.
