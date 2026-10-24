@@ -1,5 +1,5 @@
-use contract::Result;
-use reqwest::Client;
+use contract::{NetworkError, Result};
+use reqwest::{Client, Response};
 use serde::de::DeserializeOwned;
 use std::path::PathBuf;
 use tokio::fs::File;
@@ -19,14 +19,14 @@ impl Network {
 
     /// Fetch JSON data from a URL and deserialize it into type [T]
     pub async fn fetch<T: DeserializeOwned>(&self, url: &str) -> Result<T> {
-        let response = self.client.get(url).send().await?;
+        let response = successful(url, self.client.get(url).send().await?)?;
         let data = response.json::<T>().await?;
         Ok(data)
     }
 
     /// Download a file from a URL and save it to the specified path
     pub async fn download(&self, from_url: &str, store_path: PathBuf) -> Result<()> {
-        let response = self.client.get(from_url).send().await?;
+        let response = successful(from_url, self.client.get(from_url).send().await?)?;
         let bytes = response.bytes().await?;
 
         let mut file = File::create(store_path).await?;
@@ -41,6 +41,19 @@ impl Default for Network {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn successful(url: &str, response: Response) -> Result<Response> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+
+    Err(NetworkError::Status {
+        url: url.to_string(),
+        status: status.as_u16(),
+    }
+    .into())
 }
 
 #[cfg(test)]
