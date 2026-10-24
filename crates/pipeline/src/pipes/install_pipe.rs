@@ -28,7 +28,7 @@ impl InstallPipe {
 
         Self {
             packages,
-            resolver: Resolver::new(cache_dir.clone()),
+            resolver: Resolver::new(cache_dir.clone(), context.registry.clone()),
             cache_dir,
             locked_packages: Arc::new(Mutex::new(HashMap::new())),
             unzip_locks: Arc::new(Mutex::new(HashMap::new())),
