@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::path::PathBuf;
 
 use crate::dependency_spec::{is_location, split_name_and_spec};
 pub use crate::{NpmPackage, PackageJson};
@@ -8,6 +9,9 @@ pub struct InstallPackage {
     pub name: String,
     pub version: Option<String>,
     pub is_dev: bool,
+    /// The directory relative `file:` and `link:` specs resolve against; the project directory
+    /// when `None`.
+    pub base_dir: Option<PathBuf>,
 }
 
 impl InstallPackage {
@@ -16,15 +20,21 @@ impl InstallPackage {
             name,
             version,
             is_dev,
+            base_dir: None,
         }
     }
 
+    pub fn with_base_dir(mut self, base_dir: PathBuf) -> Self {
+        self.base_dir = Some(base_dir);
+        self
+    }
+
     pub fn to_cache_key(&self) -> String {
-        format!(
-            "{}-{}",
-            self.name,
-            self.version.clone().unwrap_or("latest".to_string())
-        )
+        let spec = self.version.as_deref().unwrap_or("latest");
+        match &self.base_dir {
+            Some(base_dir) => format!("{}-{spec}@{}", self.name, base_dir.display()),
+            None => format!("{}-{spec}", self.name),
+        }
     }
 
     /// Parses a `craft add` argument: `name`, `name@spec`, `@scope/name@spec`, or a bare git
