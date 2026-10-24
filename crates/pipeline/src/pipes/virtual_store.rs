@@ -5,8 +5,11 @@ use resolver::{ArtifactSource, NodeId, ResolvedArtifact, short_hash};
 pub const VIRTUAL_STORE_DIR: &str = ".craft";
 /// The hidden hoisting directory inside the virtual store; never a package entry itself.
 pub(crate) const HOIST_DIR: &str = "node_modules";
-/// The lockfile `node_modules` was last laid out from, kept inside the virtual store.
-pub const INSTALLED_LOCKFILE: &str = "lock.json";
+/// What `node_modules` was last laid out from (lockfile and script policy), kept inside the
+/// virtual store.
+pub const INSTALLED_STATE: &str = "state";
+/// Written into an entry once its install scripts succeeded.
+const BUILT_MARKER: &str = ".built";
 /// Longer entry names are truncated and suffixed with a hash, as pnpm does, to stay well under
 /// filesystem name limits.
 const MAX_ENTRY_NAME_LENGTH: usize = 120;
@@ -36,6 +39,18 @@ impl VirtualStore {
         self.root
             .join(entry_name(node_id, artifact))
             .join("node_modules")
+    }
+
+    /// Present once the entry's install scripts have run successfully.
+    pub fn built_marker(&self, node_id: &NodeId, artifact: &ResolvedArtifact) -> PathBuf {
+        self.root
+            .join(entry_name(node_id, artifact))
+            .join(BUILT_MARKER)
+    }
+
+    /// The entry directory itself, removed when its install scripts fail.
+    pub fn entry_dir(&self, node_id: &NodeId, artifact: &ResolvedArtifact) -> PathBuf {
+        self.root.join(entry_name(node_id, artifact))
     }
 
     /// Where dependents link to: the package inside its entry, or a `link:` target in place.
