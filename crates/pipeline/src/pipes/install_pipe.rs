@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use contract::{Context, Pipeline, Result};
 use futures::stream::{self, StreamExt};
 use package::InstallPackage;
@@ -38,7 +39,11 @@ impl InstallPipe {
     }
 
     #[async_recursion::async_recursion]
-    async fn resolve_package(&self, package: &InstallPackage) -> Result<NodeId> {
+    async fn resolve_package(
+        &self,
+        package: &InstallPackage,
+        ancestry: &[NodeId],
+    ) -> Result<NodeId> {
         let slot = {
             let mut requests = self.requests.lock().await;
             requests.entry(package.to_cache_key()).or_default().clone()
@@ -50,7 +55,11 @@ impl InstallPipe {
         }
 
         debug::info!("Resolving package: {package:?}");
-        let artifact = self.resolver.resolve(package).await?;
+        let artifact = self
+            .resolver
+            .resolve(package)
+            .await
+            .with_context(|| failure_message(package, ancestry))?;
         let node_id = NodeId::new(&artifact.name, &artifact.version);
         *resolved = Some(node_id.clone());
         // Released before recursing so cyclic dependencies find this node instead of waiting on it.
@@ -61,8 +70,11 @@ impl InstallPipe {
             return Ok(node_id);
         }
 
-        self.fetch(&artifact).await?;
-        let dependencies = self.resolve_dependencies(&artifact).await?;
+        self.fetch(&artifact)
+            .await
+            .with_context(|| failure_message(package, ancestry))?;
+        let ancestry = [ancestry, std::slice::from_ref(&node_id)].concat();
+        let dependencies = self.resolve_dependencies(&artifact, &ancestry).await?;
 
         self.nodes.lock().await.insert(
             node_id.clone(),
@@ -85,7 +97,11 @@ impl InstallPipe {
         unzip(download_artifact.path, package_dir).await
     }
 
-    async fn resolve_dependencies(&self, artifact: &ResolvedArtifact) -> Result<Vec<Edge>> {
+    async fn resolve_dependencies(
+        &self,
+        artifact: &ResolvedArtifact,
+        ancestry: &[NodeId],
+    ) -> Result<Vec<Edge>> {
         let Some(dependencies) = artifact
             .package
             .as_ref()
@@ -102,7 +118,7 @@ impl InstallPipe {
         let results: Vec<Result<Edge>> = stream::iter(dependencies)
             .map(|(name, spec)| async move {
                 let package = InstallPackage::new(name.clone(), Some(spec.clone()), false);
-                let target = self.resolve_package(&package).await?;
+                let target = self.resolve_package(&package, ancestry).await?;
                 Ok(Edge {
                     name,
                     spec: Some(spec),
@@ -140,7 +156,7 @@ impl Pipeline<ResolutionGraph> for InstallPipe {
 
         let results: Vec<Result<Edge>> = stream::iter(packages)
             .map(|package| async move {
-                let target = self.resolve_package(&package).await?;
+                let target = self.resolve_package(&package, &[]).await?;
                 let kind = if package.is_dev {
                     DependencyKind::Development
                 } else {
@@ -162,4 +178,17 @@ impl Pipeline<ResolutionGraph> for InstallPipe {
 
         Ok(ResolutionGraph { roots, nodes })
     }
+}
+
+fn failure_message(package: &InstallPackage, ancestry: &[NodeId]) -> String {
+    if ancestry.is_empty() {
+        return format!("failed to install {package}");
+    }
+
+    let chain = ancestry
+        .iter()
+        .map(NodeId::to_string)
+        .collect::<Vec<_>>()
+        .join(" > ");
+    format!("failed to install {package} (required by {chain})")
 }
