@@ -1,3 +1,4 @@
+use predicates::str::contains;
 use serde_json::json;
 use testkit::{MockRegistry, PackageFixture};
 
@@ -85,6 +86,48 @@ fn adds_a_package_under_an_alias() {
 }
 
 #[test]
+fn saves_exact_versions_with_the_exact_flag() {
+    let registry = MockRegistry::start();
+    registry
+        .publish(PackageFixture::new("ms", "2.1.3"))
+        .publish(PackageFixture::new("string-width", "4.2.3"));
+    let project = Project::new(&registry, json!({ "name": "app" }));
+
+    project
+        .craft()
+        .args(["add", "-E", "ms@^2.0.0", "sw@npm:string-width@^4.2.0"])
+        .assert()
+        .success();
+
+    let dependencies = &project.package_json()["dependencies"];
+    assert_eq!(dependencies["ms"], "2.1.3");
+    assert_eq!(dependencies["sw"], "npm:string-width@4.2.3");
+}
+
+#[test]
+fn moves_a_dependency_between_sections() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("ms", "2.1.3"));
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "ms": "^2.0.0", "zod": "^3.0.0" } }),
+    );
+
+    project.craft().args(["add", "-D", "ms"]).assert().success();
+
+    let package_json = project.package_json();
+    assert!(package_json["dependencies"].get("ms").is_none());
+    assert_eq!(package_json["dependencies"]["zod"], "^3.0.0");
+    assert_eq!(package_json["devDependencies"]["ms"], "^2.1.3");
+
+    project.craft().args(["add", "ms"]).assert().success();
+
+    let package_json = project.package_json();
+    assert_eq!(package_json["dependencies"]["ms"], "^2.1.3");
+    assert!(package_json["devDependencies"].get("ms").is_none());
+}
+
+#[test]
 fn adds_a_package_by_dist_tag() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("ms", "2.1.3"));
@@ -100,14 +143,18 @@ fn adds_a_package_by_dist_tag() {
 }
 
 #[test]
-#[ignore = "fixed by 1.9: craft add installs before discovering package.json is missing"]
 fn fails_before_installing_without_package_json() {
     let registry = MockRegistry::start();
     registry.publish(PackageFixture::new("ms", "2.1.3"));
     let project = Project::new(&registry, json!({}));
     std::fs::remove_file(project.path().join("package.json")).expect("remove package.json");
 
-    project.craft().args(["add", "ms"]).assert().failure();
+    project
+        .craft()
+        .args(["add", "ms"])
+        .assert()
+        .failure()
+        .stderr(contains("no package.json found"));
 
     assert!(registry.requested_paths().is_empty());
     assert!(!project.path().join("node_modules").exists());
