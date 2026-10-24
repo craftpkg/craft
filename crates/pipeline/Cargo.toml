@@ -14,6 +14,7 @@ resolver = { path = "../resolver" }
 debug = { path = "../debug" }
 tarball = { path = "../tarball" }
 fsutil = { path = "../fsutil" }
+node-semver = "2.0"
 futures = "0.3"
 tokio = { version = "1.48.0", features = ["full"] }
 async-recursion = "1.0"
