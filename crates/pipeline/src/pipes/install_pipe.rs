@@ -290,26 +290,42 @@ impl Pipeline<ResolutionGraph> for InstallPipe {
             concurrency
         );
 
-        let results: Vec<Result<Edge>> = stream::iter(packages)
+        let results: Vec<Result<Option<Edge>>> = stream::iter(packages)
             .map(|package| async move {
-                let target = self.resolve_package(&package, &[]).await?;
-                let kind = if package.is_dev {
+                let target = match self.resolve_package(&package, &[]).await {
+                    Ok(target) => target,
+                    Err(error) if package.is_optional => {
+                        self.context
+                            .reporter
+                            .warn(format!("skipping optional dependency {package}: {error:#}"));
+                        return Ok(None);
+                    }
+                    Err(error) => return Err(error),
+                };
+                let kind = if package.is_optional {
+                    DependencyKind::Optional
+                } else if package.is_dev {
                     DependencyKind::Development
                 } else {
                     DependencyKind::Production
                 };
-                Ok(Edge {
+                Ok(Some(Edge {
                     name: package.name,
                     spec: package.version,
                     target,
                     kind,
-                })
+                }))
             })
             .buffered(concurrency)
             .collect()
             .await;
 
-        let mut roots = results.into_iter().collect::<Result<Vec<_>>>()?;
+        let mut roots: Vec<Edge> = results
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect();
         let nodes = self.nodes.lock().await.clone();
         for root in &mut roots {
             name_bare_location(root, &nodes);
