@@ -10,7 +10,7 @@ const TICK: Duration = Duration::from_millis(80);
 pub enum OutputMode {
     /// A live status line on a terminal, plus the summary.
     Interactive,
-    /// The summary only: for pipes, CI and verbose logs, where a live line would garble output.
+    /// The summary only: for pipes, CI and debug logs, where a live line would garble output.
     Plain,
     /// Nothing but warnings and errors.
     Silent,
