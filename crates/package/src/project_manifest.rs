@@ -12,15 +12,31 @@ const BYTE_ORDER_MARK: char = '\u{feff}';
 pub enum DependencySection {
     Dependencies,
     DevDependencies,
+    OptionalDependencies,
+    /// Declared for consumers; installed through `devDependencies` for development.
+    PeerDependencies,
 }
 
 impl DependencySection {
-    pub const ALL: [Self; 2] = [Self::Dependencies, Self::DevDependencies];
+    pub const ALL: [Self; 4] = [
+        Self::Dependencies,
+        Self::DevDependencies,
+        Self::OptionalDependencies,
+        Self::PeerDependencies,
+    ];
+    /// The sections craft installs from; a package lives in exactly one of them.
+    pub const INSTALLED: [Self; 3] = [
+        Self::Dependencies,
+        Self::DevDependencies,
+        Self::OptionalDependencies,
+    ];
 
     pub fn key(self) -> &'static str {
         match self {
             Self::Dependencies => "dependencies",
             Self::DevDependencies => "devDependencies",
+            Self::OptionalDependencies => "optionalDependencies",
+            Self::PeerDependencies => "peerDependencies",
         }
     }
 }
@@ -97,6 +113,30 @@ impl ProjectManifest {
             self.root.shift_remove(section.key());
         }
         was_listed
+    }
+
+    /// Adds `names` to `trustedDependencies`, keeping the list sorted and free of duplicates.
+    /// Returns whether anything was added.
+    pub fn trust(&mut self, names: &[String]) -> bool {
+        let mut trusted: Vec<String> = self
+            .root
+            .get("trustedDependencies")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|name| name.as_str().map(str::to_string))
+            .collect();
+        let before = trusted.len();
+        trusted.extend(names.iter().cloned());
+        trusted.sort();
+        trusted.dedup();
+        let is_changed = trusted.len() != before;
+        if is_changed {
+            let list = trusted.into_iter().map(Value::String).collect();
+            self.root
+                .insert("trustedDependencies".to_string(), Value::Array(list));
+        }
+        is_changed
     }
 
     pub fn render(&self) -> Result<String> {
@@ -258,6 +298,20 @@ mod tests {
     fn test_byte_order_mark_is_dropped() {
         let manifest = manifest("\u{feff}{\n  \"name\": \"app\"\n}\n");
         assert_eq!(manifest.render().unwrap(), "{\n  \"name\": \"app\"\n}\n");
+    }
+
+    #[test]
+    fn test_trust_keeps_a_sorted_unique_list() {
+        let mut manifest =
+            manifest("{\n  \"name\": \"app\",\n  \"trustedDependencies\": [\"esbuild\"]\n}\n");
+
+        assert!(manifest.trust(&["bcrypt".to_string(), "esbuild".to_string()]));
+        assert!(!manifest.trust(&["bcrypt".to_string()]));
+
+        assert_eq!(
+            manifest.render().unwrap(),
+            "{\n  \"name\": \"app\",\n  \"trustedDependencies\": [\n    \"bcrypt\",\n    \"esbuild\"\n  ]\n}\n"
+        );
     }
 
     #[test]
