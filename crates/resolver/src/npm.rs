@@ -5,7 +5,11 @@ use tokio::sync::OnceCell;
 
 use crate::{ArtifactSource, ResolvedArtifact};
 use anyhow::Result;
-use contract::{NetworkError, RegistryConfig, RegistryError};
+use contract::{NetworkError, NetworkMode, RegistryConfig, RegistryError};
+use network::Revalidated;
+use std::path::PathBuf;
+
+use crate::metadata_cache::{CachedPackument, MetadataCache};
 use network::{Integrity, Network};
 use node_semver::{Range, Version};
 use package::{NpmPackage, PlatformConstraints, VersionRequirement};
@@ -18,14 +22,16 @@ pub struct NpmResolver {
     client: Network,
     registry: RegistryConfig,
     packuments: Mutex<HashMap<String, PackumentCell>>,
+    cache: MetadataCache,
 }
 
 impl NpmResolver {
-    pub fn new(registry: RegistryConfig) -> Self {
+    pub fn new(registry: RegistryConfig, cache_dir: PathBuf) -> Self {
         Self {
             client: Network::new(&registry),
             registry,
             packuments: Mutex::new(HashMap::new()),
+            cache: MetadataCache::new(cache_dir),
         }
     }
 
@@ -39,19 +45,57 @@ impl NpmResolver {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             packuments.entry(name.to_string()).or_default().clone()
         };
-        let packument = cell
-            .get_or_try_init(|| async {
-                let registry = self.registry.registry_for(name);
-                let url = packument_url(registry, name);
-                debug::info!("Fetching {url}");
-                self.client
-                    .fetch::<NpmPackage>(&url)
-                    .await
-                    .map(Arc::new)
-                    .map_err(|error| registry_error(name, registry, error))
-            })
-            .await?;
+        let packument = cell.get_or_try_init(|| self.load_packument(name)).await?;
         Ok(Arc::clone(packument))
+    }
+
+    /// From the metadata cache when the network mode allows or the registry says it's still
+    /// current, from the registry otherwise.
+    async fn load_packument(&self, name: &str) -> Result<Arc<NpmPackage>> {
+        let registry = self.registry.registry_for(name);
+        let url = packument_url(registry, name);
+        let cached = self.cache.read(registry, name).await;
+        let cached_packument = cached
+            .as_ref()
+            .and_then(|cached| serde_json::from_slice::<NpmPackage>(&cached.body).ok());
+
+        let may_use_cache = match self.registry.network_mode {
+            NetworkMode::Offline | NetworkMode::PreferOffline => true,
+            NetworkMode::Online => cached.as_ref().is_some_and(CachedPackument::is_fresh),
+        };
+        let cached_packument = match cached_packument {
+            Some(packument) if may_use_cache => {
+                debug::info!("Using cached metadata of {name}");
+                return Ok(Arc::new(packument));
+            }
+            other => other,
+        };
+
+        debug::info!("Fetching {url}");
+        let validators = cached_packument
+            .is_some()
+            .then(|| cached.as_ref().map(|cached| &cached.validators))
+            .flatten();
+        let revalidated = self
+            .client
+            .fetch_revalidated(&url, validators)
+            .await
+            .map_err(|error| registry_error(name, registry, error))?;
+        match (revalidated, cached_packument) {
+            (Revalidated::NotModified(validators), Some(packument)) => {
+                self.cache.touch(registry, name, validators).await;
+                Ok(Arc::new(packument))
+            }
+            (Revalidated::Fresh { body, validators }, _) => {
+                let packument: NpmPackage = serde_json::from_slice(&body)
+                    .map_err(|error| registry_error(name, registry, error.into()))?;
+                self.cache.write(registry, name, &body, validators).await;
+                Ok(Arc::new(packument))
+            }
+            (Revalidated::NotModified(_), None) => Err(anyhow::anyhow!(
+                "{registry} answered 304 for {name}, which is not cached"
+            )),
+        }
     }
 
     pub async fn resolve(
@@ -99,7 +143,9 @@ fn packument_url(registry: &str, name: &str) -> String {
 fn registry_error(name: &str, registry: &str, error: anyhow::Error) -> anyhow::Error {
     let status = match error.downcast_ref::<NetworkError>() {
         Some(NetworkError::Status { status, .. }) => *status,
-        None => return error.context(format!("failed to fetch {name} from {registry}")),
+        Some(NetworkError::Offline { .. }) | None => {
+            return error.context(format!("failed to fetch {name} from {registry}"));
+        }
     };
     let name = name.to_string();
     let registry = registry.to_string();
@@ -207,7 +253,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_react_latest() {
-        let resolver = NpmResolver::new(RegistryConfig::default());
+        let resolver = NpmResolver::new(
+            RegistryConfig::default(),
+            std::env::temp_dir().join("craft-test-metadata"),
+        );
         let artifact = resolver
             .resolve("react", &requirement("latest"))
             .await
@@ -223,7 +272,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_react_specific_version() {
-        let resolver = NpmResolver::new(RegistryConfig::default());
+        let resolver = NpmResolver::new(
+            RegistryConfig::default(),
+            std::env::temp_dir().join("craft-test-metadata"),
+        );
         let artifact = resolver
             .resolve("react", &requirement("17.0.2"))
             .await
@@ -241,7 +293,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires network access to registry.npmjs.org"]
     async fn test_resolve_invalid_package() {
-        let resolver = NpmResolver::new(RegistryConfig::default());
+        let resolver = NpmResolver::new(
+            RegistryConfig::default(),
+            std::env::temp_dir().join("craft-test-metadata"),
+        );
         let result = resolver
             .resolve("invalid-package-name-12345", &requirement("latest"))
             .await;
