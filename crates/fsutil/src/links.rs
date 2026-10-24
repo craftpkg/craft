@@ -38,7 +38,7 @@ pub async fn ensure_dir(path: &Path) -> io::Result<()> {
     ensure_dir_inner(path).await.at("create directory", path)
 }
 
-async fn ensure_dir_inner(path: &Path) -> io::Result<()> {
+pub(crate) async fn ensure_dir_inner(path: &Path) -> io::Result<()> {
     match fs::create_dir_all(path).await {
         Err(error) if is_blocked(&error) => {}
         other => return other,
@@ -64,11 +64,14 @@ pub async fn force_symlink_dir(target: &Path, link: &Path) -> io::Result<()> {
         .at("link", link)
 }
 
-/// Points `link` at the file `target`, replacing whatever `link` was.
-pub async fn force_symlink_file(target: &Path, link: &Path) -> io::Result<()> {
-    force_symlink(target, link, LinkKind::File)
-        .await
-        .at("link", link)
+/// Where the symlink or junction at `link` points, as an absolute path with `.` and `..`
+/// resolved.
+pub async fn read_link_resolved(link: &Path) -> io::Result<PathBuf> {
+    let target = fs::read_link(link).await?;
+    let base = link.parent().unwrap_or(Path::new(""));
+    Ok(normalize_lexically(
+        &base.join(without_verbatim_prefix(&target)),
+    ))
 }
 
 /// `target` expressed relative to the directory holding `link`, so the link survives moving the
@@ -114,31 +117,65 @@ pub fn normalize_lexically(path: &Path) -> PathBuf {
 }
 
 #[derive(Clone, Copy)]
-enum LinkKind {
+pub(crate) enum LinkKind {
     Dir,
+    #[cfg(unix)]
     File,
 }
 
 /// Creates the link under a unique staging name and renames it over `link`, so concurrent
 /// writers and stale or dangling entries never surface as `EEXIST`.
-async fn force_symlink(target: &Path, link: &Path, kind: LinkKind) -> io::Result<()> {
+pub(crate) async fn force_symlink(target: &Path, link: &Path, kind: LinkKind) -> io::Result<()> {
     if let Some(parent) = link.parent() {
         ensure_dir_inner(parent).await?;
     }
     let staging = staging_path(link);
     create_symlink(target, &staging, kind).await?;
 
-    let renamed = match fs::rename(&staging, link).await {
+    let moved = move_into_place(&staging, link).await;
+    if moved.is_err() {
+        let _ = remove_link_or_file(&staging).await;
+    }
+    moved
+}
+
+#[cfg(unix)]
+async fn move_into_place(staging: &Path, link: &Path) -> io::Result<()> {
+    match fs::rename(staging, link).await {
         Ok(()) => Ok(()),
         Err(_) => {
             remove_entry_inner(link).await?;
-            fs::rename(&staging, link).await
+            fs::rename(staging, link).await
         }
-    };
-    if renamed.is_err() {
-        let _ = remove_link_or_file(&staging).await;
     }
-    renamed
+}
+
+/// Windows cannot rename onto an existing directory (and Wine reports success without moving
+/// anything), so the old entry is removed first and the move confirmed. Another writer may put
+/// a link in place in between; once `link` points where `staging` does, the work is done.
+#[cfg(windows)]
+async fn move_into_place(staging: &Path, link: &Path) -> io::Result<()> {
+    const ATTEMPTS: usize = 16;
+
+    let wanted = read_link_resolved(staging).await?;
+    for _ in 0..ATTEMPTS {
+        let is_in_place = read_link_resolved(link)
+            .await
+            .is_ok_and(|current| current == wanted);
+        if is_in_place {
+            return remove_link_or_file(staging).await;
+        }
+        remove_entry_inner(link).await?;
+        let renamed = fs::rename(staging, link).await.is_ok();
+        let is_moved = renamed && fs::symlink_metadata(staging).await.is_err();
+        if is_moved {
+            return Ok(());
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "it kept being replaced by another process",
+    ))
 }
 
 fn is_blocked(error: &io::Error) -> bool {
@@ -162,11 +199,31 @@ async fn create_symlink(target: &Path, link: &Path, _kind: LinkKind) -> io::Resu
     fs::symlink(target, link).await
 }
 
+/// Directories are linked with junctions, which unlike symlinks need neither administrator
+/// rights nor Developer Mode, but only take absolute targets.
 #[cfg(windows)]
-async fn create_symlink(target: &Path, link: &Path, kind: LinkKind) -> io::Result<()> {
-    match kind {
-        LinkKind::Dir => fs::symlink_dir(target, link).await,
-        LinkKind::File => fs::symlink_file(target, link).await,
+async fn create_symlink(target: &Path, link: &Path, _kind: LinkKind) -> io::Result<()> {
+    let base = link.parent().unwrap_or(Path::new(""));
+    let target = std::path::absolute(normalize_lexically(&base.join(target)))?;
+    let link = link.to_path_buf();
+    tokio::task::spawn_blocking(move || junction::create(&target, &link))
+        .await
+        .map_err(io::Error::other)?
+}
+
+#[cfg(unix)]
+fn without_verbatim_prefix(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
+/// Junction targets read back as `\\?\C:\…`, which never compares equal to the `C:\…`
+/// paths craft builds.
+#[cfg(windows)]
+fn without_verbatim_prefix(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\UNC\") {
+        Some(share) => PathBuf::from(format!(r"\\{share}")),
+        None => PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text)),
     }
 }
 
@@ -272,7 +329,7 @@ mod tests {
 
         for link in [&dangling, &real_dir, &file] {
             force_symlink_dir(&target, link).await.unwrap();
-            assert_eq!(std::fs::read_link(link).unwrap(), target);
+            assert_eq!(read_link_resolved(link).await.unwrap(), target);
         }
         let entries = std::fs::read_dir(dir.path().join("node_modules"))
             .unwrap()
@@ -297,7 +354,7 @@ mod tests {
             task.await.unwrap().unwrap();
         }
 
-        assert_eq!(std::fs::read_link(&link).unwrap(), target);
+        assert_eq!(read_link_resolved(&link).await.unwrap(), target);
     }
 
     #[test]
