@@ -32,7 +32,7 @@ impl Resolver {
             npm_resolver: NpmResolver::new(context.registry.clone()),
             locked: LockPreferences::default(),
             is_frozen: false,
-            network: Network::new(),
+            network: Network::new(&context.registry),
             context: context.clone(),
             download_locks: Arc::new(Mutex::new(HashMap::new())),
         }
