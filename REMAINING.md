@@ -50,7 +50,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 1.10 | Preserve `package.json` formatting and key order | P1 | [x] |
 | 1.11 | `craft remove` fixes | P1 | [x] |
 | 1.12 | `craft run` fixes (PATH, exit code, quoting, pre/post, env) | P1 | [x] |
-| 1.13 | Git / tarball-URL / `file:` / `link:` dependencies | P1 | [ ] |
+| 1.13 | Git / tarball-URL / `file:` / `link:` dependencies | P1 | [~] tarball, `file:`, `link:` done; git open |
 | 1.14 | Bin linking edge cases | P1 | [ ] |
 | **Phase 2 — Store & layout redesign** | | | |
 | 2.1 | Global content-addressed store (read-only) | P0 | [ ] |
@@ -400,7 +400,11 @@ Use relative symlink targets where possible (relocatable `node_modules`). Use it
 - Bins (`craft <bin>`) should be spawned directly (no shell), with args passed as an argv array.
 - Unknown script and no matching bin → `error: script "<name>" not found` plus the available scripts, instead of running it as a raw shell command (decide: keep fallback to `PATH` lookup only for explicit `craft exec`).
 
-### 1.13 Git / tarball / `file:` / `link:` dependencies · P1 📖
+### 1.13 Git / tarball / `file:` / `link:` dependencies · P1 📖 — ◐ tarball, `file:`, `link:` done; git open
+
+> Done (first half): `ResolvedArtifact.source` is an `ArtifactSource` (`Registry` / `Tarball` / `LocalTarball` / `Directory` / `Link`) that decides the node id (`name@version` for the registry, `name@<url>` / `name@file:<abs path>` / `name@link:<abs path>` otherwise) and the package directory. Local and URL sources are materialized while resolving, since their name, version and dependencies come from their own `package.json`: tarball URLs are downloaded once per URL and extracted by content hash (sha512, recorded as integrity); `file:<tarball>` is extracted by content hash; `file:<dir>` is copied fresh into the cache on every install, without `node_modules`/`.git`, and its registry dependencies are installed; `link:<dir>` is symlinked in place with no dependencies installed. Relative paths resolve against the dependent's directory (`InstallPackage.base_dir`), `~/` against the home directory. `craft add ./libs/x` names the dependency after the package found there and saves `file:libs/x`; URLs and `file:`/`link:` specs are saved verbatim. Also fixed: manifests read from tarballs failed on loosely typed metadata (lodash 4.17.21 has a string `keywords`), so the unused `description`/`keywords` fields are no longer typed. Verified against the real registry and a GitHub codeload tarball.
+>
+> Open: git dependencies (hosted shorthands via codeload, generic git via `git`), `workspace:` (7.x).
 
 **Problem** — `GitResolver` (`crates/resolver/src/git.rs`) returns the git URL as `download_url`, which reqwest then tries to `GET` — git deps can never install. Version is the literal `"git"`.
 
