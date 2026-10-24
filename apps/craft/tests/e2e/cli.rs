@@ -29,7 +29,7 @@ fn describes_every_command_in_help() {
         .assert()
         .success()
         .stdout(contains("Add packages to package.json and install them"))
-        .stdout(contains("install  Install the project's dependencies"))
+        .stdout(contains("Install the project's dependencies"))
         .stdout(contains("[aliases: rm, uninstall, un]"))
         .stdout(contains("Create a package.json"));
 }
@@ -306,4 +306,67 @@ fn production_installs_leave_dev_dependencies_out() {
         .success()
         .stdout(contains("Already up to date").not());
     assert!(project.require("react").is_ok());
+}
+
+#[test]
+fn reports_and_updates_outdated_dependencies() {
+    let registry = MockRegistry::start();
+    publish_summary_packages(&registry);
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "react": "^18.0.0", "debug": "4.4.0" } }),
+    );
+    project.craft().arg("install").assert().success();
+
+    project.craft().arg("outdated").assert().success().stdout(
+        "Package  Current  Wanted  Latest  Type\nreact    18.3.1   18.3.1  19.2.0  dependencies\n",
+    );
+
+    project
+        .craft()
+        .args(["update", "--latest"])
+        .assert()
+        .success()
+        .stdout(contains("~ react 18.3.1 → 19.2.0"));
+
+    let package_json = project.package_json();
+    assert_eq!(package_json["dependencies"]["react"], "^19.2.0");
+    assert_eq!(package_json["dependencies"]["debug"], "4.4.0");
+    assert_eq!(project.required_version("react"), Ok("19.2.0".to_string()));
+    project
+        .craft()
+        .arg("outdated")
+        .assert()
+        .success()
+        .stdout("All dependencies are up to date\n");
+}
+
+#[test]
+fn updates_within_the_specifier_without_touching_package_json() {
+    let registry = MockRegistry::start();
+    publish_summary_packages(&registry);
+    let project = Project::new(&registry, json!({ "dependencies": { "debug": "^4.0.0" } }));
+    project.craft().arg("install").assert().success();
+    registry.publish(PackageFixture::new("ms", "2.1.4"));
+    let package_json = project.read_file("package.json");
+
+    project.craft().args(["update", "debug"]).assert().success();
+    assert_eq!(
+        project.require("debug").expect("debug loads")["dependencies"]["ms"],
+        "2.1.3"
+    );
+
+    project.craft().arg("update").assert().success();
+    assert_eq!(
+        project.require("debug").expect("debug loads")["dependencies"]["ms"],
+        "2.1.4"
+    );
+    assert_eq!(project.read_file("package.json"), package_json);
+
+    project
+        .craft()
+        .args(["update", "lodash"])
+        .assert()
+        .failure()
+        .stderr(contains("lodash is not a dependency of this project"));
 }
