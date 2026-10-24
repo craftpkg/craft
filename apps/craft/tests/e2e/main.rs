@@ -10,4 +10,5 @@ mod platforms;
 mod prune;
 mod remove;
 mod run;
+mod scripts;
 mod sources;
