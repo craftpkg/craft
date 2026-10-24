@@ -13,7 +13,7 @@ jobs:
   build-test-lint:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -30,7 +30,15 @@ jobs:
         node-version: 22
 
     - name: Run make (build, test, lint)
+      if: runner.os != 'Windows'
       run: make
+
+    - name: Build, test and lint
+      if: runner.os == 'Windows'
+      run: |
+        cargo fmt --all --check
+        cargo clippy --workspace --all-targets -- -D warnings
+        cargo test --workspace
 
   registry-tests:
     runs-on: ubuntu-latest
