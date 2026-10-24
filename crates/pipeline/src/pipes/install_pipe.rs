@@ -103,7 +103,9 @@ impl InstallPipe {
         }
 
         let download_artifact = self.resolver.download(artifact).await?;
-        unzip(download_artifact.path, package_dir).await
+        let extracted = unzip(download_artifact.path.clone(), package_dir).await;
+        let _ = tokio::fs::remove_file(&download_artifact.path).await;
+        extracted
     }
 
     async fn resolve_dependencies(
