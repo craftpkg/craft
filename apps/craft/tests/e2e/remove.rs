@@ -1,3 +1,4 @@
+use predicates::str::contains;
 use serde_json::json;
 use testkit::{MockRegistry, PackageFixture};
 
@@ -65,11 +66,15 @@ fn removes_a_dangling_symlink() {
 }
 
 #[test]
-#[ignore = "fixed by 1.11: craft remove leaves the package's bins in node_modules/.bin"]
 fn removes_the_bins_of_a_removed_package() {
     let registry = MockRegistry::start();
-    registry.publish(PackageFixture::new("cowsay", "1.6.0").bin("cowsay", "cli.js"));
-    let project = Project::new(&registry, json!({ "dependencies": { "cowsay": "^1.0.0" } }));
+    registry
+        .publish(PackageFixture::new("cowsay", "1.6.0").bin("cowsay", "cli.js"))
+        .publish(PackageFixture::new("typescript", "5.9.3").bin("tsc", "bin/tsc"));
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "cowsay": "^1.0.0", "typescript": "^5.0.0" } }),
+    );
     project.craft().arg("install").assert().success();
 
     project
@@ -80,6 +85,24 @@ fn removes_the_bins_of_a_removed_package() {
 
     let bin = project.path().join("node_modules/.bin/cowsay");
     assert!(std::fs::symlink_metadata(bin).is_err());
+    assert!(project.path().join("node_modules/.bin/tsc").exists());
+}
+
+#[test]
+fn warns_about_packages_that_are_not_dependencies() {
+    let registry = MockRegistry::start();
+    let original = "{\n  \"dependencies\": {\n    \"zod\": \"^3.0.0\"\n  }\n}\n";
+    let project = Project::new(&registry, json!({}));
+    project.write_file("package.json", original);
+
+    project
+        .craft()
+        .args(["remove", "ms"])
+        .assert()
+        .success()
+        .stderr(contains("warning: ms is not a dependency of this project"));
+
+    assert_eq!(project.read_file("package.json"), original);
 }
 
 #[cfg(unix)]
