@@ -256,6 +256,32 @@ fn reports_a_git_ref_that_does_not_exist() {
         )));
 }
 
+#[test]
+fn keeps_a_git_dependency_on_its_locked_commit() {
+    let registry = MockRegistry::start();
+    let project = Project::new(&registry, json!({}));
+    let url = git_repository(&project);
+    project.write_file(
+        "package.json",
+        &json!({ "dependencies": { "git-lib": format!("git+{url}#main") } }).to_string(),
+    );
+    project.craft().arg("install").assert().success();
+
+    let repository = project.path().join("repos/git-lib");
+    project.write_file(
+        "repos/git-lib/package.json",
+        r#"{ "name": "git-lib", "version": "3.0.0" }"#,
+    );
+    commit_all(&repository, "3.0.0");
+    std::fs::remove_dir_all(project.path().join("node_modules")).expect("remove node_modules");
+    project.craft().arg("install").assert().success();
+
+    assert_eq!(
+        project.required_version("git-lib"),
+        Ok("2.0.0-dev".to_string())
+    );
+}
+
 /// A repository with `v1.0.0` (lightweight tag), `v1.1.0` (annotated tag) and an untagged
 /// `2.0.0-dev` commit on `main`, returned as a `file://` URL.
 fn git_repository(project: &Project) -> String {
