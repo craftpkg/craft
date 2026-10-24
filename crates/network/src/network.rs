@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::Semaphore;
+use tempfile::TempPath;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::Integrity;
 use bytes::Bytes;
@@ -9,7 +11,6 @@ use contract::{NetworkError, RegistryConfig, Result, user_agent};
 use reqwest::header::{AUTHORIZATION, RETRY_AFTER};
 use reqwest::{Certificate, Client, ClientBuilder, NoProxy, Proxy, RequestBuilder};
 use serde::de::DeserializeOwned;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -65,23 +66,67 @@ impl Network {
         store_path: PathBuf,
         integrity: Option<&Integrity>,
     ) -> Result<()> {
-        let bytes = self.get_body(from_url).await?;
-        if let Some(integrity) = integrity {
-            integrity.verify(&bytes)?;
-        }
+        let dir = store_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let temp_path = self
+            .with_retries(from_url, || {
+                self.stream_to_temp_file(from_url, &dir, integrity)
+            })
+            .await?;
+        temp_path.persist(&store_path)?;
+        Ok(())
+    }
 
-        tokio::task::spawn_blocking(move || write_atomically(&store_path, &bytes)).await?
+    /// Streams the body into a temp file beside the destination while hashing it, so a large
+    /// tarball is never held in memory and nothing lands at the destination unverified.
+    async fn stream_to_temp_file(
+        &self,
+        url: &str,
+        dir: &Path,
+        integrity: Option<&Integrity>,
+    ) -> std::result::Result<TempPath, Failure> {
+        let mut response = self.send(url).await?;
+        let (file, temp_path) = tempfile::NamedTempFile::new_in(dir)
+            .map_err(Failure::fatal)?
+            .into_parts();
+        let mut file = tokio::fs::File::from_std(file);
+        let mut hasher = integrity.map(Integrity::hasher);
+
+        while let Some(chunk) = response.chunk().await.map_err(Failure::from_transport)? {
+            if let Some(hasher) = &mut hasher {
+                hasher.update(&chunk);
+            }
+            file.write_all(&chunk).await.map_err(Failure::fatal)?;
+        }
+        file.flush().await.map_err(Failure::fatal)?;
+        if let Some(hasher) = hasher {
+            hasher.verify().map_err(Failure::fatal)?;
+        }
+        Ok(temp_path)
     }
 }
 
 impl Network {
-    /// GETs `url`, retrying connection failures, timeouts, interrupted bodies, 429 and 5xx
-    /// with exponential backoff (or the server's `Retry-After`), `fetch-retries` times.
+    /// GETs `url` and reads the whole body, with retries.
     async fn get_body(&self, url: &str) -> Result<Bytes> {
+        self.with_retries(url, || async {
+            let response = self.send(url).await?;
+            response.bytes().await.map_err(Failure::from_transport)
+        })
+        .await
+    }
+
+    /// Runs `operation` until it succeeds, retrying connection failures, timeouts, interrupted
+    /// bodies, 429 and 5xx with exponential backoff (or the server's `Retry-After`),
+    /// `fetch-retries` times.
+    async fn with_retries<T, F, Fut>(&self, url: &str, operation: F) -> Result<T>
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = std::result::Result<T, Failure>>,
+    {
         let mut attempt = 0;
         loop {
-            let failure = match self.attempt(url).await {
-                Ok(body) => return Ok(body),
+            let failure = match operation().await {
+                Ok(value) => return Ok(value),
                 Err(failure) => failure,
             };
             let may_retry = failure.is_retryable && attempt < self.registry.fetch_retries;
@@ -96,12 +141,13 @@ impl Network {
         }
     }
 
-    async fn attempt(&self, url: &str) -> std::result::Result<Bytes, Failure> {
-        let _permit = self.permits.acquire().await.map_err(|error| Failure {
-            error: error.into(),
-            is_retryable: false,
-            retry_after: None,
-        })?;
+    /// Sends the GET and checks its status, holding a request permit while the response is
+    /// in flight.
+    async fn send(&self, url: &str) -> std::result::Result<PermittedResponse, Failure> {
+        let permit = Arc::clone(&self.permits)
+            .acquire_owned()
+            .await
+            .map_err(Failure::fatal)?;
         let response = self
             .get(url)
             .send()
@@ -125,7 +171,26 @@ impl Network {
                 retry_after,
             });
         }
-        response.bytes().await.map_err(Failure::from_transport)
+        Ok(PermittedResponse {
+            response,
+            _permit: permit,
+        })
+    }
+}
+
+/// A response that keeps its request permit until the body has been read.
+struct PermittedResponse {
+    response: reqwest::Response,
+    _permit: OwnedSemaphorePermit,
+}
+
+impl PermittedResponse {
+    async fn chunk(&mut self) -> reqwest::Result<Option<Bytes>> {
+        self.response.chunk().await
+    }
+
+    async fn bytes(self) -> reqwest::Result<Bytes> {
+        self.response.bytes().await
     }
 }
 
@@ -136,6 +201,14 @@ struct Failure {
 }
 
 impl Failure {
+    fn fatal(error: impl Into<anyhow::Error>) -> Self {
+        Self {
+            error: error.into(),
+            is_retryable: false,
+            retry_after: None,
+        }
+    }
+
     fn from_transport(error: reqwest::Error) -> Self {
         let is_retryable =
             error.is_connect() || error.is_timeout() || error.is_body() || error.is_request();
@@ -213,15 +286,6 @@ fn with_proxy(
     }
 }
 
-/// Writes to a temp file beside `path`, then renames it into place.
-fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
-    let dir = path.parent().unwrap_or(Path::new("."));
-    let mut file = tempfile::NamedTempFile::new_in(dir)?;
-    file.write_all(bytes)?;
-    file.persist(path)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,18 +294,6 @@ mod tests {
     fn test_network_new() {
         let network = Network::new(&RegistryConfig::default());
         assert!(std::mem::size_of_val(&network.client) > 0);
-    }
-
-    #[test]
-    fn test_write_atomically_leaves_only_the_complete_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("pkg-1.0.0.tgz");
-        std::fs::write(&path, "stale").unwrap();
-
-        write_atomically(&path, b"complete").unwrap();
-
-        assert_eq!(std::fs::read(&path).unwrap(), b"complete");
-        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]
