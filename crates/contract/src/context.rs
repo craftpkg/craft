@@ -14,7 +14,7 @@ pub struct Context {
     pub cwd: PathBuf,
     pub craft_home: PathBuf,
     pub registry: RegistryConfig,
-    pub verbose: bool,
+    pub debug: bool,
     /// Whether craft runs in CI (`CI` is set and not `0`/`false`), where installs are frozen.
     pub ci: bool,
     /// The platform optional and platform-specific packages are chosen for.
@@ -24,12 +24,12 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn new(cwd: PathBuf, craft_home: PathBuf, verbose: bool) -> Self {
+    pub fn new(cwd: PathBuf, craft_home: PathBuf, debug: bool) -> Self {
         Self {
             cwd,
             craft_home,
             registry: RegistryConfig::default(),
-            verbose,
+            debug,
             ci: false,
             platform: HostPlatform::detect(),
             reporter: Reporter::default(),
@@ -39,7 +39,7 @@ impl Context {
     /// `craft_home` comes from `CRAFT_HOME`, falling back to `~/.craft`. Registry settings come
     /// from `.npmrc` files and `npm_config_*` variables, with `CRAFT_REGISTRY` overriding the
     /// default registry.
-    pub fn from_env(verbose: bool) -> Result<Self> {
+    pub fn from_env(debug: bool) -> Result<Self> {
         let cwd = std::env::current_dir()?;
         let user_home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
         let env: HashMap<String, String> = std::env::vars().collect();
@@ -54,7 +54,7 @@ impl Context {
             ci: is_ci(std::env::var("CI").ok().as_deref()),
             platform,
             registry,
-            ..Self::new(cwd, craft_home, verbose)
+            ..Self::new(cwd, craft_home, debug)
         };
 
         match std::env::var(CRAFT_REGISTRY) {
