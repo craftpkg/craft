@@ -47,7 +47,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 1.7 | Integrity verification (`dist.integrity` / `shasum`) | P0 | [x] |
 | 1.8 | Symlink-safe filesystem helpers (dangling links) | P0 | [x] |
 | 1.9 | `craft add` fixes | P1 | [x] |
-| 1.10 | Preserve `package.json` formatting and key order | P1 | [ ] |
+| 1.10 | Preserve `package.json` formatting and key order | P1 | [x] |
 | 1.11 | `craft remove` fixes | P1 | [ ] |
 | 1.12 | `craft run` fixes (PATH, exit code, quoting, pre/post, env) | P1 | [ ] |
 | 1.13 | Git / tarball-URL / `file:` / `link:` dependencies | P1 | [ ] |
@@ -349,7 +349,9 @@ Use relative symlink targets where possible (relocatable `node_modules`). Use it
 - If the package already exists in the other section (`dependencies` vs `devDependencies`), move it.
 - After Phase 3: run a full install (all deps) so the lockfile stays consistent.
 
-### 1.10 Preserve `package.json` formatting · P1 ✅
+### 1.10 Preserve `package.json` formatting · P1 ✅ — ✔ done
+
+> Done: `package::ProjectManifest` edits `package.json` as an order-preserving `serde_json` map (`preserve_order` enabled) and writes back the detected indent (spaces or tabs, 2 by default for minified files), CRLF line endings and trailing newline; a BOM is dropped. New entries go in at their alphabetical position, updated ones keep theirs, and a section emptied by removal is deleted. `craft add` and `craft remove` both use it, and `remove` only writes when something changed. Verified byte-identical add → remove round trips on this repo's `package.json` and a tab/CRLF file against the real registry. The typed `PackageJson` remains for reading.
 
 **Problem** — writes go through the typed `PackageJson` struct with a `HashMap` `other` field (`crates/package/src/npm.rs:28-29`) and `serde_json` without `preserve_order`. Result: top-level keys reorder between runs (`private`/`type` swapped in testing), indentation is forced to 2 spaces, trailing newline is dropped → noisy git diffs.
 
