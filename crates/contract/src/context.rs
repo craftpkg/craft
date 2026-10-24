@@ -1,17 +1,18 @@
+use std::collections::HashMap;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::HostPlatform;
 use crate::constants::{
-    CRAFT_CPU, CRAFT_HOME, CRAFT_LIBC, CRAFT_OS, CRAFT_REGISTRY, DEFAULT_REGISTRY, STORE_VERSION,
+    CRAFT_CPU, CRAFT_HOME, CRAFT_LIBC, CRAFT_OS, CRAFT_REGISTRY, STORE_VERSION,
 };
 use crate::{ContextError, Result};
+use crate::{HostPlatform, RegistryConfig};
 
 #[derive(Debug, Clone)]
 pub struct Context {
     pub cwd: PathBuf,
     pub craft_home: PathBuf,
-    pub registry: String,
+    pub registry: RegistryConfig,
     pub verbose: bool,
     /// Whether craft runs in CI (`CI` is set and not `0`/`false`), where installs are frozen.
     pub ci: bool,
@@ -24,18 +25,21 @@ impl Context {
         Self {
             cwd,
             craft_home,
-            registry: DEFAULT_REGISTRY.to_string(),
+            registry: RegistryConfig::default(),
             verbose,
             ci: false,
             platform: HostPlatform::detect(),
         }
     }
 
-    /// `craft_home` comes from `CRAFT_HOME`, falling back to `~/.craft`.
-    /// `registry` comes from `CRAFT_REGISTRY`, falling back to the public npm registry.
+    /// `craft_home` comes from `CRAFT_HOME`, falling back to `~/.craft`. Registry settings come
+    /// from `.npmrc` files and `npm_config_*` variables, with `CRAFT_REGISTRY` overriding the
+    /// default registry.
     pub fn from_env(verbose: bool) -> Result<Self> {
         let cwd = std::env::current_dir()?;
         let user_home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+        let env: HashMap<String, String> = std::env::vars().collect();
+        let registry = RegistryConfig::load(&cwd, user_home.as_deref().map(Path::new), &env);
         let craft_home = resolve_craft_home(std::env::var_os(CRAFT_HOME), user_home)?;
         let platform = HostPlatform::detect().with_overrides(
             std::env::var(CRAFT_OS).ok(),
@@ -45,6 +49,7 @@ impl Context {
         let context = Self {
             ci: is_ci(std::env::var("CI").ok().as_deref()),
             platform,
+            registry,
             ..Self::new(cwd, craft_home, verbose)
         };
 
@@ -55,7 +60,7 @@ impl Context {
     }
 
     pub fn with_registry(mut self, registry: &str) -> Self {
-        self.registry = registry.trim_end_matches('/').to_string();
+        self.registry = self.registry.with_default_registry(registry);
         self
     }
 
@@ -142,14 +147,17 @@ mod tests {
     #[test]
     fn test_registry_defaults_to_npm() {
         let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false);
-        assert_eq!(context.registry, "https://registry.npmjs.org");
+        assert_eq!(
+            context.registry.default_registry,
+            "https://registry.npmjs.org"
+        );
     }
 
     #[test]
     fn test_with_registry_strips_trailing_slash() {
         let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false)
             .with_registry("http://127.0.0.1:4873/");
-        assert_eq!(context.registry, "http://127.0.0.1:4873");
+        assert_eq!(context.registry.default_registry, "http://127.0.0.1:4873");
     }
 
     #[test]
