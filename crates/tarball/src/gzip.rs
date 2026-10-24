@@ -1,10 +1,12 @@
 use std::fs::{self, File};
 use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 
 use contract::TarballError;
 use flate2::read::GzDecoder;
 use tar::{Archive, EntryType};
+use tokio::sync::Semaphore;
 
 const EXECUTABLE_MODE: u32 = 0o755;
 const EXECUTE_BITS: u32 = 0o111;
@@ -13,7 +15,17 @@ const EXECUTE_BITS: u32 = 0o111;
 /// `package/` for most packages, but `@types/*` use `node/` and older packages other names.
 /// `dest` appears only once fully extracted; if another process extracts it first, theirs is kept.
 pub async fn unzip(source: PathBuf, dest: PathBuf) -> contract::Result<()> {
+    let _permit = extraction_permits().acquire().await?;
     tokio::task::spawn_blocking(move || extract_atomically(&source, &dest)).await?
+}
+
+/// Extraction is CPU-bound, so more of it at once than there are cores only adds contention.
+fn extraction_permits() -> &'static Semaphore {
+    static PERMITS: OnceLock<Semaphore> = OnceLock::new();
+    PERMITS.get_or_init(|| {
+        let cores = std::thread::available_parallelism().map_or(4, |cores| cores.get());
+        Semaphore::new(cores)
+    })
 }
 
 fn extract_atomically(source: &Path, dest: &Path) -> contract::Result<()> {
