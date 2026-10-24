@@ -111,6 +111,17 @@ impl DependencySpec {
         }
     }
 
+    /// How a location dependency is written to package.json: paths as `file:<path>` or
+    /// `link:<path>` without a leading `./`, URLs as given. `None` for registry specs.
+    pub fn location_spec(&self) -> Option<String> {
+        match self {
+            Self::File { path, .. } => Some(format!("file:{}", path.trim_start_matches("./"))),
+            Self::Link { path, .. } => Some(format!("link:{path}")),
+            Self::Tarball { url, .. } | Self::Git { url, .. } => Some(url.clone()),
+            Self::Registry { .. } | Self::Alias { .. } | Self::Workspace { .. } => None,
+        }
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Registry { .. } => "registry",
@@ -409,5 +420,26 @@ mod tests {
             name: name.to_string(),
             requirement,
         }
+    }
+
+    #[test]
+    fn test_location_spec_is_normalized_for_saving() {
+        let location = |name: &str, spec: Option<&str>| {
+            DependencySpec::parse(name, spec).unwrap().location_spec()
+        };
+        assert_eq!(location("./libs/x", None), Some("file:libs/x".to_string()));
+        assert_eq!(
+            location("x", Some("file:../shared")),
+            Some("file:../shared".to_string())
+        );
+        assert_eq!(
+            location("x", Some("link:../x")),
+            Some("link:../x".to_string())
+        );
+        assert_eq!(
+            location("x", Some("https://example.com/x.tgz")),
+            Some("https://example.com/x.tgz".to_string())
+        );
+        assert_eq!(location("x", Some("^1.0.0")), None);
     }
 }
