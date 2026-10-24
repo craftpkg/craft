@@ -44,7 +44,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 1.4 | Tarball root-directory stripping | P0 | [x] |
 | 1.5 | HTTP status checks + friendly registry errors | P0 | [x] |
 | 1.6 | Atomic download and extraction | P0 | [x] |
-| 1.7 | Integrity verification (`dist.integrity` / `shasum`) | P0 | [ ] |
+| 1.7 | Integrity verification (`dist.integrity` / `shasum`) | P0 | [x] |
 | 1.8 | Symlink-safe filesystem helpers (dangling links) | P0 | [ ] |
 | 1.9 | `craft add` fixes | P1 | [ ] |
 | 1.10 | Preserve `package.json` formatting and key order | P1 | [ ] |
@@ -296,7 +296,9 @@ Caused by: missing field `name` at line 1 column 21
 
 **Done when** killing `craft` mid-install and re-running produces a working install; two concurrent installs never error.
 
-### 1.7 Integrity verification · P0 📖
+### 1.7 Integrity verification · P0 📖 — ✔ done
+
+> Done: `PackageDist` reads `integrity` and `shasum`; `network::Integrity` parses SRI (`sha512`/`sha384`/`sha256`/`sha1`, strongest listed algorithm wins, `?options` and unknown algorithms ignored) or falls back to the sha1 `shasum`, and is stored on `ResolvedArtifact` for the lockfile. `Network::download` verifies before the atomic rename, so a mismatch (`IntegrityError::Mismatch`, both hashes in the message) leaves nothing in the cache. A cached `.tgz` is re-verified before reuse and downloaded again if it no longer matches. Hashing still buffers the whole body; streaming is 5.5. Also fixed: the e2e suite stalled for 90s in about half the runs, because tiny_http's thread pool loses wakeups while threads sit on keep-alive connections; `MockRegistry` now uses a std `TcpListener` that answers one request per connection.
 
 **Problem** — `PackageDist` only has `tarball` (`crates/package/src/npm.rs:58-60`); `dist.integrity` / `dist.shasum` are ignored. Nothing stops a corrupted or tampered tarball from being installed.
 
