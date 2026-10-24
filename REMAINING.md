@@ -45,7 +45,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 1.5 | HTTP status checks + friendly registry errors | P0 | [x] |
 | 1.6 | Atomic download and extraction | P0 | [x] |
 | 1.7 | Integrity verification (`dist.integrity` / `shasum`) | P0 | [x] |
-| 1.8 | Symlink-safe filesystem helpers (dangling links) | P0 | [ ] |
+| 1.8 | Symlink-safe filesystem helpers (dangling links) | P0 | [x] |
 | 1.9 | `craft add` fixes | P1 | [ ] |
 | 1.10 | Preserve `package.json` formatting and key order | P1 | [ ] |
 | 1.11 | `craft remove` fixes | P1 | [ ] |
@@ -310,7 +310,9 @@ Caused by: missing field `name` at line 1 column 21
 
 **Done when** the corrupt-tarball fixture fails with an integrity error and leaves nothing in the cache.
 
-### 1.8 Symlink-safe filesystem helpers · P0 ✅
+### 1.8 Symlink-safe filesystem helpers · P0 ✅ — ✔ done
+
+> Done: new `fsutil` crate. `remove_entry` removes a file, tree or symlink (dangling included) without following it. `force_symlink_dir` / `force_symlink_file` create the link under a unique staging name and rename it over the destination, so stale entries, dangling links and concurrent writers never surface as `EEXIST`. `ensure_dir` replaces anything in the way of a directory (a dangling `.bin` or `@scope` link, a stray file). `relative_target` gives `.bin` links npm-style targets (`../typescript/bin/tsc`); package links stay absolute because they point into `~/.craft`. The linker and `craft remove` use them everywhere. The concurrent-install e2e scenario now passes (25/25 runs), so it is no longer ignored; the cross-project interference it stood for remains a 2.2 concern.
 
 **Problem** — `Path::exists()` follows symlinks, so a dangling link looks absent; the next `symlink()` fails with `EEXIST`, and `remove` skips it.
 
@@ -411,7 +413,7 @@ Can be split: tarball URL + `file:` + `link:` first (simple), git hosts second.
 - ~~Bin source path for transitive deps uses `artifact.name`, not the alias link name~~ (fixed in 1.2: bins resolve through `edge.name`).
 - `directories.bin` not supported.
 - Bin names/paths from manifests are not sanitized (a bin named `../../x` writes outside `.bin`).
-- Two packages providing the same bin race in parallel linking (`buffer_unordered(10)` over roots, `linker_pipe.rs:304-311`) → nondeterministic winner / `EEXIST`.
+- Two packages providing the same bin race in parallel linking (`buffer_unordered(10)` over roots, `linker_pipe.rs:304-311`) → nondeterministic winner (no longer `EEXIST` since 1.8).
 
 **Fix** — normalize bins in one function (`HashMap<SafeBinName, RelativePath>`), reject names containing `/` or `..`, link bins sequentially (or with a deterministic rule: direct dependency wins over transitive), use relative symlink targets, `chmod 0o755` the target.
 
@@ -422,7 +424,7 @@ Can be split: tarball URL + `file:` + `link:` first (simple), git hosts second.
 **Why** — today each package's dependency symlinks are written **into the shared global cache**
 (`~/.craft/packages/<pkg>/package/node_modules/<dep>`, `linker_pipe.rs:41-90`). Consequences:
 
-- ✅ Concurrent installs in different projects race: 2 of 6 parallel installs failed with `File exists (os error 17)`.
+- ~~Concurrent installs in different projects race: 2 of 6 parallel installs failed with `File exists (os error 17)`.~~ No longer errors since 1.8's atomic link replacement, but the projects still rewrite each other's links in the shared cache.
 - One project's resolution silently rewrites another project's dependency tree.
 - ✅ Peer deps can't work: Node resolves symlinks to their real path in `~/.craft`, so a package can never see the project's `react` (`@tanstack/react-query` → `Cannot find module 'react'`).
 
