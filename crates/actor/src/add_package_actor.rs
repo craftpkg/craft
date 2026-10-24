@@ -95,6 +95,6 @@ mod tests {
         let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false);
         let actor = AddPackageActor::with(context, payload);
         assert_eq!(actor.payload.packages.len(), 1);
-        assert_eq!(actor.payload.is_dev, true);
+        assert!(actor.payload.is_dev);
     }
 }
