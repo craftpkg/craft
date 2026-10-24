@@ -1,4 +1,4 @@
-use contract::{Actor, Pipeline};
+use contract::{Actor, Context, Pipeline};
 use package::{InstallPackage, PackageJson};
 use pipeline::{InstallPipe, LinkerPipe};
 
@@ -15,12 +15,13 @@ impl std::fmt::Display for AddActorPayload {
 }
 
 pub struct AddPackageActor {
+    context: Context,
     payload: AddActorPayload,
 }
 
 impl Actor<AddActorPayload> for AddPackageActor {
-    fn with(payload: AddActorPayload) -> Self {
-        Self { payload }
+    fn with(context: Context, payload: AddActorPayload) -> Self {
+        Self { context, payload }
     }
 
     async fn run(&self) -> contract::Result<()> {
@@ -30,11 +31,14 @@ impl Actor<AddActorPayload> for AddPackageActor {
             pkgs.push(InstallPackage::from_literal(pkg, self.payload.is_dev));
         }
 
-        let artifacts = InstallPipe::new(pkgs.clone()).run().await?;
+        let artifacts = InstallPipe::new(&self.context, pkgs.clone()).run().await?;
 
-        LinkerPipe::new(artifacts.clone(), pkgs).run().await?;
+        LinkerPipe::new(&self.context, artifacts.clone(), pkgs)
+            .run()
+            .await?;
 
-        let mut package_json = PackageJson::from_file().await?;
+        let package_json_path = self.context.package_json_path();
+        let mut package_json = PackageJson::from_file(&package_json_path).await?;
 
         // Add only the explicitly requested packages to dependencies or devDependencies
         for pkg_name in &self.payload.packages {
@@ -60,7 +64,7 @@ impl Actor<AddActorPayload> for AddPackageActor {
 
         // Write updated package.json
         let updated_content = serde_json::to_string_pretty(&package_json)?;
-        tokio::fs::write(&PackageJson::file_path()?, updated_content).await?;
+        tokio::fs::write(&package_json_path, updated_content).await?;
         debug::info!("Updated package.json");
 
         Ok(())
@@ -88,7 +92,8 @@ mod tests {
             is_dev: true,
         };
 
-        let actor = AddPackageActor::with(payload);
+        let context = Context::new("/work/app".into(), "/home/me/.craft".into(), false);
+        let actor = AddPackageActor::with(context, payload);
         assert_eq!(actor.payload.packages.len(), 1);
         assert_eq!(actor.payload.is_dev, true);
     }
