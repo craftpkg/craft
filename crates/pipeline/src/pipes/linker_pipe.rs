@@ -6,7 +6,6 @@ use contract::{Context, Pipeline, PlatformError, Result};
 use futures::stream::{self, StreamExt};
 use node_semver::Version;
 use resolver::{ArtifactSource, DependencyKind, Edge, NodeId, ResolutionGraph, ResolvedNode};
-use tokio::fs;
 
 use super::bins::package_bins;
 use super::prune::prune_node_modules;
@@ -146,10 +145,8 @@ impl LinkerPipe {
                     continue;
                 }
 
-                let link = bin_dir.join(&bin_name);
                 let source = package_dir.join(&bin_path);
-                fsutil::force_symlink_file(&fsutil::relative_target(&link, &source), &link).await?;
-                make_executable(&source).await;
+                fsutil::link_bin(&source, &bin_dir.join(&bin_name)).await?;
                 debug::info!("Linked bin {} -> {:?}", bin_name, source);
                 owners.insert(bin_name, &edge.name);
             }
@@ -268,20 +265,6 @@ async fn run_all(tasks: impl Iterator<Item = impl Future<Output = Result<()>>>) 
     results.into_iter().collect()
 }
 
-/// Adds execute permission for everyone, keeping the file's other mode bits.
-#[cfg(unix)]
-async fn make_executable(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-
-    if let Ok(metadata) = fs::metadata(path).await {
-        let mode = metadata.permissions().mode() | 0o111;
-        let _ = fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).await;
-    }
-}
-
-#[cfg(not(unix))]
-async fn make_executable(_path: &Path) {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,6 +272,7 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
+    use tokio::fs;
 
     #[tokio::test]
     async fn test_link_binaries() -> Result<()> {
@@ -360,11 +344,15 @@ mod tests {
             .join("node_modules")
             .join(".bin")
             .join(pkg_name);
-        assert!(bin_link.exists());
-        assert!(bin_link.is_symlink());
-
-        let target = tokio::fs::read_link(&bin_link).await?;
-        assert_eq!(target, PathBuf::from("../test-pkg/cli.js"));
+        assert_eq!(
+            fsutil::bin_target(&bin_link).await,
+            Some(temp_cwd.path().join("node_modules/test-pkg/cli.js"))
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            tokio::fs::read_link(&bin_link).await?,
+            PathBuf::from("../test-pkg/cli.js")
+        );
 
         Ok(())
     }
