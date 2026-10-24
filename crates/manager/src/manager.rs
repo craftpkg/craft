@@ -1,6 +1,7 @@
 use actor::{
-    AddActorPayload, AddPackageActor, CleanCacheActor, CleanCacheActorPayload, InstallActor,
-    InstallOptions, RemoveActorPayload, RemovePackageActor, RunScriptActor, RunScriptActorPayload,
+    AddActorPayload, AddPackageActor, CleanCacheActor, CleanCacheActorPayload, InitActor,
+    InstallActor, InstallOptions, ListScriptsActor, RemoveActorPayload, RemovePackageActor,
+    RunScriptActor, RunScriptActorPayload,
 };
 use cli::{Action, CacheCommands};
 use contract::{Actor, Context};
@@ -46,6 +47,8 @@ impl CraftManager {
                     .run()
                     .await
             }
+            Action::ListScripts => ListScriptsActor::with(context, ()).run().await,
+            Action::Init => InitActor::with(context, ()).run().await,
             Action::Cache { command } => match command {
                 CacheCommands::Clean { force } => {
                     CleanCacheActor::with(context, CleanCacheActorPayload { force })
@@ -134,7 +137,10 @@ mod tests {
             .await;
 
         let error = result.err().map(|e| e.to_string());
-        assert_eq!(error.as_deref(), Some("no package.json found"));
+        assert_eq!(
+            error.as_deref(),
+            Some("no package.json found; run `craft init` to create one")
+        );
         Ok(())
     }
 
