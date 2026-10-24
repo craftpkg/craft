@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use tokio::fs;
 
-use super::virtual_store::{HOIST_DIR, VIRTUAL_STORE_DIR};
+use super::virtual_store::{HOIST_DIR, INSTALLED_LOCKFILE, VIRTUAL_STORE_DIR};
 
 /// Removes what the project no longer uses from `node_modules`: top-level links to packages
 /// outside `keep_roots` (when given), every virtual store entry no top-level link reaches,
@@ -33,7 +33,8 @@ pub async fn prune_node_modules(
     };
     while let Some(entry) = entries.next_entry().await? {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let is_unused = name != HOIST_DIR && !reachable.contains(&name);
+        let is_craft_file = name == HOIST_DIR || name == INSTALLED_LOCKFILE;
+        let is_unused = !is_craft_file && !reachable.contains(&name);
         if is_unused {
             debug::info!("Pruning {}", name);
             fsutil::remove_entry(&entry.path()).await?;
