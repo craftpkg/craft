@@ -1,3 +1,4 @@
+use predicates::prelude::*;
 use predicates::str::contains;
 use serde_json::json;
 use testkit::{MockRegistry, PackageFixture};
@@ -202,4 +203,107 @@ fn lists_and_explains_installed_packages() {
         .assert()
         .success()
         .stdout("ms 2.1.3\n  dependencies: debug 4.4.0 → ms 2.1.3\n");
+}
+
+#[test]
+fn trusts_a_package_and_runs_its_scripts() {
+    let registry = MockRegistry::start();
+    registry.publish(PackageFixture::new("native", "1.0.0").manifest_field(
+        "scripts",
+        json!({ "postinstall": "node -e \"require('fs').writeFileSync('built.txt', 'yes')\"" }),
+    ));
+    let project = Project::new(&registry, json!({ "dependencies": { "native": "^1.0.0" } }));
+    project.craft().arg("install").assert().success();
+
+    project
+        .craft()
+        .args(["trust", "native"])
+        .assert()
+        .success()
+        .stdout(contains("Trusted native"))
+        .stdout(contains("Ran install scripts of native@1.0.0"));
+
+    assert_eq!(
+        project.package_json()["trustedDependencies"],
+        json!(["native"])
+    );
+}
+
+#[test]
+fn saves_optional_and_peer_dependencies() {
+    let registry = MockRegistry::start();
+    publish_summary_packages(&registry);
+    let project = Project::new(&registry, json!({ "name": "lib" }));
+
+    project.craft().args(["add", "-O", "ms"]).assert().success();
+    project
+        .craft()
+        .args(["add", "-P", "react@^19.0.0"])
+        .assert()
+        .success();
+
+    let package_json = project.package_json();
+    assert_eq!(package_json["optionalDependencies"]["ms"], "^2.1.3");
+    assert_eq!(package_json["peerDependencies"]["react"], "^19.2.0");
+    assert_eq!(package_json["devDependencies"]["react"], "^19.2.0");
+    assert!(package_json.get("dependencies").is_none());
+    let lock: serde_json::Value =
+        serde_json::from_str(&project.read_file("craft.lock")).expect("craft.lock is JSON");
+    assert_eq!(
+        lock["importers"]["."]["optionalDependencies"]["ms"]["version"],
+        "ms@2.1.3"
+    );
+    assert!(project.require("ms").is_ok());
+    assert!(project.require("react").is_ok());
+}
+
+#[test]
+fn skips_a_missing_optional_dependency_of_the_project() {
+    let registry = MockRegistry::start();
+    publish_summary_packages(&registry);
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "debug": "^4.0.0" }, "optionalDependencies": { "ghost": "^1.0.0" } }),
+    );
+
+    project
+        .craft()
+        .arg("install")
+        .assert()
+        .success()
+        .stderr(contains(
+            "warning: skipping optional dependency ghost@^1.0.0",
+        ));
+
+    assert!(project.require("debug").is_ok());
+}
+
+#[test]
+fn production_installs_leave_dev_dependencies_out() {
+    let registry = MockRegistry::start();
+    publish_summary_packages(&registry);
+    let project = Project::new(
+        &registry,
+        json!({ "dependencies": { "debug": "^4.0.0" }, "devDependencies": { "react": "^19.0.0" } }),
+    );
+    project.craft().arg("install").assert().success();
+    let lock = project.read_file("craft.lock");
+
+    project
+        .craft()
+        .args(["install", "--production"])
+        .assert()
+        .success();
+
+    assert!(project.require("debug").is_ok());
+    assert!(project.require("react").is_err());
+    assert_eq!(project.read_file("craft.lock"), lock);
+
+    project
+        .craft()
+        .arg("install")
+        .assert()
+        .success()
+        .stdout(contains("Already up to date").not());
+    assert!(project.require("react").is_ok());
 }
