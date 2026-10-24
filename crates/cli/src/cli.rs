@@ -86,6 +86,17 @@ pub enum Commands {
         #[arg(long, visible_alias = "prod")]
         production: bool,
     },
+    /// Show direct dependencies with newer versions available.
+    Outdated,
+    /// Update dependencies within their specifiers, or to their latest versions with --latest.
+    #[command(visible_aliases = ["up", "upgrade"])]
+    Update {
+        /// The dependencies to update; all of them when none are given.
+        packages: Vec<String>,
+        /// Move to the latest versions and rewrite the specifiers in package.json.
+        #[arg(short = 'L', long)]
+        latest: bool,
+    },
     /// Allow packages to run install scripts, then install.
     Trust {
         #[arg(required = true)]
@@ -184,6 +195,11 @@ pub enum Action {
     Trust {
         packages: Vec<String>,
     },
+    Outdated,
+    Update {
+        packages: Vec<String>,
+        latest: bool,
+    },
 }
 
 impl Cli {
@@ -238,6 +254,11 @@ impl Cli {
             },
             Commands::Trust { packages } => Action::Trust {
                 packages: packages.clone(),
+            },
+            Commands::Outdated => Action::Outdated,
+            Commands::Update { packages, latest } => Action::Update {
+                packages: packages.clone(),
+                latest: *latest,
             },
             Commands::Ci { ignore_scripts } => Action::Ci {
                 ignore_scripts: *ignore_scripts,
