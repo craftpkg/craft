@@ -9,6 +9,7 @@ use flate2::read::GzDecoder;
 use tar::{Archive, EntryType};
 use tokio::sync::Semaphore;
 
+#[cfg(unix)]
 const EXECUTABLE_MODE: u32 = 0o755;
 const EXECUTE_BITS: u32 = 0o111;
 
@@ -297,6 +298,7 @@ mod tests {
             }
         }
 
+        #[cfg(unix)]
         fn mode(self, mode: u32) -> Self {
             Self { mode, ..self }
         }
