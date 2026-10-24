@@ -18,12 +18,17 @@ impl CraftManager {
         let context = self.context.clone();
 
         match action {
-            Action::Add { packages, dev } => {
+            Action::Add {
+                packages,
+                dev,
+                exact,
+            } => {
                 AddPackageActor::with(
                     context,
                     AddActorPayload {
                         packages,
                         is_dev: dev,
+                        is_exact: exact,
                     },
                 )
                 .run()
