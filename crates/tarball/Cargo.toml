@@ -1,7 +1,10 @@
 [package]
 name = "tarball"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+
+[lints]
+workspace = true
 
 [dependencies]
 flate2 = "1.0"
