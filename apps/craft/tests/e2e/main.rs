@@ -5,3 +5,4 @@ mod common;
 mod install;
 mod remove;
 mod run;
+mod sources;
