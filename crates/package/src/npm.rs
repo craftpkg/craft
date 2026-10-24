@@ -136,7 +136,9 @@ impl PackageJson {
             return Err(PackageError::NoPackageJson.into());
         }
 
-        let content = fs::read_to_string(package_json_path).await?;
+        let content = fs::read_to_string(package_json_path)
+            .await
+            .with_context(|| format!("could not read {}", package_json_path.display()))?;
         let package_json: PackageJson = serde_json::from_str(&content)
             .with_context(|| format!("failed to parse {}", package_json_path.display()))?;
         Ok(package_json)
