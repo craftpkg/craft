@@ -41,7 +41,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 1.1 | Dependency spec classification — no more panics | P0 | [x] |
 | 1.2 | `InstallPipe` returns a resolution graph, not a flat list | P0 | [x] |
 | 1.3 | npm alias linking (root + transitive) | P0 | [x] |
-| 1.4 | Tarball root-directory stripping | P0 | [ ] |
+| 1.4 | Tarball root-directory stripping | P0 | [x] |
 | 1.5 | HTTP status checks + friendly registry errors | P0 | [ ] |
 | 1.6 | Atomic download and extraction | P0 | [ ] |
 | 1.7 | Integrity verification (`dist.integrity` / `shasum`) | P0 | [ ] |
@@ -249,7 +249,9 @@ pub struct Edge { link_name: String /* alias-aware */, spec: String, target: Nod
 
 **Done when** both fixtures above `require()` successfully.
 
-### 1.4 Tarball root-directory stripping · P0 ✅
+### 1.4 Tarball root-directory stripping · P0 ✅ — ✔ done
+
+> Done: `tarball::gzip::unzip` strips whatever root folder entries sit under and extracts into `Context::package_dir` (`<cache>/<name>-<version>/package`), the one path the install and linker pipes share. Entries with `..`, absolute paths or a non-folder root are rejected (`TarballError::UnsafePath`); symlinks and hardlinks are skipped, as npm does. Files and dirs get default permissions, with the execute bit kept for files that had one. The `<name>-<version>/package` layout stays until the store redesign (2.1). Caches extracted with the old code under a non-`package/` root are re-extracted, since their `package/` dir is missing.
 
 **Problem** — the linker assumes the archive root is `package/` (`linker_pipe.rs:33`, `163`). `@types/*` tarballs use `node/`, some older packages use other names:
 
