@@ -52,7 +52,6 @@ fn removes_dev_dependencies() {
 }
 
 #[test]
-#[ignore = "fixed by 1.8: craft remove skips dangling symlinks"]
 fn removes_a_dangling_symlink() {
     let registry = MockRegistry::start();
     let project = Project::new(&registry, json!({ "dependencies": { "ms": "^2.0.0" } }));
