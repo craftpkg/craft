@@ -127,7 +127,9 @@ impl LifecyclePipe {
         }
 
         fsutil::write_if_changed(&self.store.built_marker(node_id, &node.artifact), b"").await?;
-        println!("Ran install scripts of {node_id}");
+        self.context
+            .reporter
+            .line(format!("Ran install scripts of {node_id}"));
         Ok(())
     }
 
@@ -144,7 +146,9 @@ impl LifecyclePipe {
         if required.contains(node_id) {
             return Err(error);
         }
-        eprintln!("warning: skipping optional {node_id}: {error:#}");
+        self.context
+            .reporter
+            .warn(format!("skipping optional {node_id}: {error:#}"));
         Ok(())
     }
 }
@@ -165,6 +169,7 @@ impl Pipeline<LifecycleReport> for LifecyclePipe {
             return Ok(report);
         }
 
+        self.context.reporter.status("Running install scripts");
         let required = required_nodes(&self.graph);
         let depths = dependency_depths(&self.graph);
         let mut waves: BTreeMap<usize, Vec<_>> = BTreeMap::new();
