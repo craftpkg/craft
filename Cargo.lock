@@ -1530,6 +1530,7 @@ dependencies = [
  "network",
  "node-semver",
  "package",
+ "serde",
  "serde_json",
  "sha2",
  "tarball",
