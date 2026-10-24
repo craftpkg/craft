@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt craft
+.PHONY: build test lint fmt craft real-world
 
 all: build test lint
 
@@ -14,6 +14,9 @@ lint:
 
 fmt:
 	cargo fmt --all
+
+real-world:
+	cargo test -p craft --test real_world -- --ignored
 
 craft:
 	cargo run -p craft -- $(filter-out $@,$(MAKECMDGOALS))
