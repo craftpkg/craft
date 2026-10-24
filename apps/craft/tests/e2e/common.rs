@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use std::rc::Rc;
 
@@ -44,6 +44,24 @@ impl Project {
 
     pub fn craft_home(&self) -> &Path {
         self.craft_home.path()
+    }
+
+    pub fn store_dir(&self) -> PathBuf {
+        self.craft_home().join("store/v1")
+    }
+
+    /// Names in the global store, sorted; empty when the store doesn't exist yet.
+    pub fn store_entries(&self) -> Vec<String> {
+        let mut entries: Vec<String> = std::fs::read_dir(self.store_dir())
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        entries.sort();
+        entries
     }
 
     pub fn craft(&self) -> Command {
