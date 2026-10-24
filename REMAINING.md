@@ -69,7 +69,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 4.3 | Lifecycle scripts with an allowlist | P0 | [x] |
 | **Phase 5 — Network & performance** | | | |
 | 5.1 | Abbreviated packuments | P2 | [ ] |
-| 5.2 | Memoize packument fetches per package name | P2 | [ ] |
+| 5.2 | Memoize packument fetches per package name | P2 | [x] |
 | 5.3 | Global concurrency limits | P2 | [ ] |
 | 5.4 | Timeouts, retries, User-Agent | P2 | [ ] |
 | 5.5 | Streaming downloads (hash while writing) | P2 | [ ] |
@@ -635,7 +635,9 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 - Send `Accept: application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8` (`network.rs:22`). `typescript` packument: 15.8 MB full vs 8.7 MB abbreviated. Abbreviated manifests still include `bin`, `dist.integrity`, `optionalDependencies`, `os`/`cpu`, `hasInstallScript`.
 - `NpmPackage` needs `#[serde(default)]` on optional fields; make manifest fields tolerant (old packages have `keywords` as a string, `dependencies` as an array, etc.) — use `serde_json::Value` or lenient deserializers for fields that aren't needed, so one bad historical version doesn't fail the whole packument.
 
-### 5.2 Memoize packument fetches per name · P2
+### 5.2 Memoize packument fetches per name · P2 — ✔ done
+
+> Done: `NpmResolver` keeps one `tokio::sync::OnceCell<Arc<NpmPackage>>` per package name, so every range requesting a package — concurrently or not — shares a single fetch; a failed fetch isn't cached and is retried by the next request. Measured on the Vite/React project without a lockfile: 276 packument requests, one per distinct name (it was 415 for a smaller tree before; the tree grew with 4.1's platform variants).
 
 - Today every `(name, range)` pair fetches the full packument again (`npm.rs:23`) — measured: 415 packument requests for a 218-package tree (`debug` ×11, `@babel/types` ×11). Cache `Arc<Packument>` per name in a `DashMap<String, OnceCell<…>>` (or `futures::Shared`) so concurrent requests for the same name share one fetch.
 
