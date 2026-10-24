@@ -7,6 +7,5 @@ edition = "2024"
 workspace = true
 
 [dependencies]
-contract = { path = "../contract" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
