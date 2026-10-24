@@ -14,6 +14,6 @@ pub use errors::{
     ContextError, IntegrityError, LockfileError, NetworkError, PackageError, PipelineError,
     PlatformError, RegistryError, ScriptError, SpecError, TarballError,
 };
-pub use npmrc::{Credentials, RegistryConfig};
+pub use npmrc::{Credentials, NetworkMode, RegistryConfig};
 pub use pipeline::Pipeline;
 pub use platform::{HostPlatform, node_cpu, node_os, user_agent};
