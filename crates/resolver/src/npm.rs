@@ -1,3 +1,8 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use tokio::sync::OnceCell;
+
 use crate::{ArtifactSource, ResolvedArtifact};
 use anyhow::Result;
 use contract::{NetworkError, RegistryError};
@@ -5,10 +10,14 @@ use network::{Integrity, Network};
 use node_semver::{Range, Version};
 use package::{NpmPackage, PlatformConstraints, VersionRequirement};
 
+/// One fetch per package name, shared by every concurrent request for it.
+type PackumentCell = Arc<OnceCell<Arc<NpmPackage>>>;
+
 #[derive(Debug)]
 pub struct NpmResolver {
     client: Network,
     registry: String,
+    packuments: Mutex<HashMap<String, PackumentCell>>,
 }
 
 impl NpmResolver {
@@ -16,7 +25,32 @@ impl NpmResolver {
         Self {
             client: Network::new(),
             registry,
+            packuments: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// The package's metadata, fetched once per install however many ranges ask for it. A
+    /// failed fetch is not remembered, so a later request tries again.
+    async fn packument(&self, name: &str) -> Result<Arc<NpmPackage>> {
+        let cell = {
+            let mut packuments = self
+                .packuments
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            packuments.entry(name.to_string()).or_default().clone()
+        };
+        let packument = cell
+            .get_or_try_init(|| async {
+                let url = format!("{}/{}", self.registry, name);
+                debug::info!("Fetching {url}");
+                self.client
+                    .fetch::<NpmPackage>(&url)
+                    .await
+                    .map(Arc::new)
+                    .map_err(|error| registry_error(name, &self.registry, error))
+            })
+            .await?;
+        Ok(Arc::clone(packument))
     }
 
     pub async fn resolve(
@@ -24,12 +58,7 @@ impl NpmResolver {
         name: &str,
         requirement: &VersionRequirement,
     ) -> Result<ResolvedArtifact> {
-        let url = format!("{}/{}", self.registry, name);
-        let npm_package = self
-            .client
-            .fetch::<NpmPackage>(&url)
-            .await
-            .map_err(|error| registry_error(name, &self.registry, error))?;
+        let npm_package = self.packument(name).await?;
 
         let version = select_version(&npm_package, requirement)
             .ok_or_else(|| anyhow::anyhow!("no version of {name} matches {requirement}"))?;
