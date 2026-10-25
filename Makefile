@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt craft real-world docs
+.PHONY: build test lint fmt craft real-world docs bench
 
 all: build test lint
 
@@ -21,6 +21,10 @@ real-world:
 docs:
 	cargo build -q --release -p craft
 	cd docs && ../target/release/craft install && ../target/release/craft run docs:dev
+
+bench:
+	cargo build -q --release -p craft
+	bench/run.sh $(filter-out $@,$(MAKECMDGOALS))
 
 craft:
 	cargo run -p craft -- $(filter-out $@,$(MAKECMDGOALS))
