@@ -1,6 +1,6 @@
 # Craft — Remaining Work
 
-Status of the Rust package manager as of **2026-10-24**, and the ordered list of work needed to finalize it.
+Status of the Rust package manager as of **2026-10-25**, and the ordered list of work needed to finalize it.
 Work through tasks top to bottom: each phase unblocks the next. Tick a task's box when it is merged.
 
 **Known-bug tests:** every open bug that has a scenario is an `#[ignore = "fixed by <task>: …"]` end-to-end test in
@@ -82,6 +82,12 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 5.5 | Streaming downloads (hash while writing) | P2 | [x] |
 | 5.6 | Metadata disk cache (ETag / 304) | P2 | [x] |
 | 5.7 | Registry configuration (`.npmrc`, scopes, auth) | P1 | [x] |
+| 5.8 | Clone whole store entries into `node_modules` | P2 | [ ] |
+| 5.9 | Lean packuments: abbreviated, parsed lazily, not all kept (supersedes 5.1) | P2 | [ ] |
+| 5.10 | Fetch tarballs off the resolution path | P2 | [ ] |
+| 5.11 | Install straight from the lockfile's graph | P2 | [ ] |
+| 5.12 | Extract while downloading | P2 | [ ] |
+| 5.13 | One network client, fewer manifest reads, no graph clones | P2 | [ ] |
 | **Phase 6 — CLI & UX** | | | |
 | 6.1 | Progress output and install summary | P2 | [x] |
 | 6.2 | Error reporting (no panics, contextual messages) | P2 | [x] |
@@ -637,7 +643,9 @@ README says "`package-lock.json` support (coming soon)" — decide whether that 
 
 Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm ≈ 3.3 s.
 
-### 5.1 Abbreviated packuments · P2 — ⏸ deferred
+**Benchmark findings (2026-10-25).** `make bench` (`bench/README.md`) races craft against npm, pnpm and Yarn. craft wins already-installed projects by 6–140×, but loses every warm-cache scenario to pnpm by 2–6×, cold installs of `large` by 2.6×, and peaks at 5.5 GB without a lockfile (pnpm: 663 MB). Profiling `large` (1,391 packages, 112,916 files) traced it to four causes, fixed by 5.8–5.13 in this order. After each, run `make` and `make bench`, and update the tables in `bench/README.md`. Memory budget for `large`: under 500 MB peak without a lockfile, under 150 MB with one; every new concurrent stage reuses an existing limit.
+
+### 5.1 Abbreviated packuments · P2 — ⏸ deferred, superseded by 5.9
 
 > Deferred after measuring: the registry's abbreviated ("corgi") manifests drop `libc` (so `@rollup/rollup-linux-x64-musl` and `-gnu` become indistinguishable on Linux, breaking 4.2) and `scripts` (only `hasInstallScript` remains), and with gzip from 5.4 the saving is small — `typescript` 2.02 MB full vs 1.70 MB abbreviated compressed, `@types/node` 1.43 vs 1.11 MB. Revisit with a fallback to the full manifest for packages whose `os` includes `linux`. Meanwhile install scripts are read from the installed package's own package.json, which also covers registries that serve abbreviated metadata.
 
@@ -684,6 +692,51 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 - Registry is hardcoded (`npm.rs:23`). Read `.npmrc` (project, user `~/.npmrc`, env `npm_config_*`): `registry`, `@scope:registry`, `//host/:_authToken`, `_auth`, `always-auth`, `strict-ssl`, `cafile`, proxies (`https-proxy`, `HTTPS_PROXY`).
 - URL-encode scoped names: `@scope%2fname`.
 - Never log tokens (verbose mode prints URLs).
+
+### 5.8 Clone whole store entries · P2
+
+Warm-cache installs spend their time in the kernel: `fsutil::copy::copy_tree` clones file by file, 112,916 `clonefileat` calls for `large`. A warm-cache install with a lockfile measured 16 s wall, 0.5 s user, 48 s sys and 491k involuntary context switches. Cloning the same store per file took 15.9 s on one thread and about 9 s on 4–16 threads; `clonefile()` once per package directory took **1.15 s** for all 1,246 entries.
+
+- On macOS, import a store entry with one `clonefile(entry, staging)` and keep the staging-then-rename publish. Fall back to the per-file path when it fails (another volume, not APFS).
+- Linux keeps per-file reflinks or hardlinks; get a Linux baseline from the Benchmark workflow before tuning it.
+- Packages whose install scripts run keep getting a real copy (`replace_with_copy`).
+- Expected: `large` warm cache with a lockfile, 9 s → about 2 s.
+
+### 5.9 Lean packuments · P2
+
+Without a lockfile, craft peaks at 5.5 GB on `large`. It requests full packuments (no `Accept` header): 1.1 GB on disk for 1,280 names, with vite 37 MB, next 30 MB and firebase 29 MB. It parses every version into `PackageJson`, whose `#[serde(flatten)] other: HashMap<String, Value>` turns each field into a JSON tree. Then it keeps all of them in `NpmResolver.packuments` until the install ends. Abbreviated metadata is far smaller (vite 37 MB → 2.3 MB, firebase 29 → 9.6 MB), but not always (next 30 → 25 MB, from thousands of canaries), so parsing must get lazier too.
+
+- Send `Accept: application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*`, and give the metadata cache a new directory for the new format.
+- Parse `versions` as raw JSON (`Box<RawValue>`); select from the keys and `dist-tags`; fully parse only the chosen version into a typed manifest without a flattened catch-all map. Keep only that per name.
+- `libc`, which 5.1 was deferred over: abbreviated manifests lack it, so a package for the other Linux libc is downloaded, then skipped once its own `package.json` shows `libc`. That costs a few small downloads on Linux and never installs the wrong package. Scripts are already read from the installed `package.json`.
+
+### 5.10 Fetch tarballs off the resolution path · P2
+
+`InstallPipe::resolve_package` downloads and extracts a package before resolving its dependencies, so a cold install's critical path is tree depth × (metadata request + download + extraction): 37 s for `large` against pnpm's 14 s.
+
+- Resolve dependencies from the packument as soon as a version is chosen; start each tarball's fetch as its own task, bounded by the network and extraction permits, and join them all before linking.
+
+### 5.11 Install straight from the lockfile's graph · P2
+
+`craft.lock` records every package's resolved `dependencies`, `peerDependencies` and `optionalDependencies`, but `LockPreferences` keeps only versions and returns `package: None`. A package's dependencies are therefore found by extracting it and reading its `package.json`, the same waterfall again: 22 s for `large` with an empty cache, against npm's 13.5 s.
+
+- When package.json matches craft.lock, build the `ResolutionGraph` from the lockfile alone, fetch every missing tarball in one parallel pass (5.10), and read bins from the store while linking. When only some dependencies changed, re-resolve just those.
+- Test with the mock registry: a lockfile install makes no packument requests and downloads in parallel.
+
+### 5.12 Extract while downloading · P2
+
+Each tarball is written to disk, reopened and extracted, with a `create_dir_all` and a separate `set_permissions` per file.
+
+- Decompress and unpack the response stream into the staging directory while hashing the compressed bytes; rename into the store only once the integrity matches.
+- flate2's `zlib-rs` backend; create files with their mode; skip directories already created.
+
+### 5.13 One network client, fewer manifest reads, no graph clones · P2
+
+- `Resolver` and `NpmResolver` each build a `Network`: two connection pools and two `network-concurrency` semaphores. Share one.
+- `LifecyclePipe::pending` reads `package.json` for every package on every install (1,243 for `large`); filter by `trustedDependencies` first.
+- The graph is cloned whole into the linker and the scripts pass, every node carrying its manifest; borrow it or share it behind an `Arc`.
+- Then tune metadata concurrency over HTTP/2 against the benchmark rather than by guess.
+- `bench/report.mjs`: report peak memory for every fixture, so each change is judged on time and memory.
 
 ---
 
