@@ -45,6 +45,16 @@ function fixtureSection(fixture) {
     section.push(`| ${SCENARIOS[scenario]} | ${timings(runs[index]).join(' | ')} |`)
   })
   section.push('')
+
+  const hasMemory = runs.flat().some((result) => result.memory !== undefined)
+  if (!hasMemory) {
+    return section
+  }
+  section.push('Peak memory:', '', `| | ${pms.join(' | ')} |`, `|---|${pms.map(() => '---:').join('|')}|`)
+  scenarios.forEach((scenario, index) => {
+    section.push(`| ${SCENARIOS[scenario]} | ${memories(runs[index]).join(' | ')} |`)
+  })
+  section.push('')
   return section
 }
 
@@ -60,10 +70,38 @@ function timings(results) {
   })
 }
 
-// hyperfine 2 nests the statistics under summary; hyperfine 1 keeps them at the top.
+function memories(results) {
+  const leanest = Math.min(...results.map((result) => result.memory ?? Infinity))
+  return results.map((result) => {
+    if (result.memory === undefined) {
+      return '–'
+    }
+    const memory = formatBytes(result.memory)
+    return result.memory === leanest ? `**${memory}**` : memory
+  })
+}
+
+// hyperfine 2 nests the statistics under summary; hyperfine 1 keeps them at the top, with
+// memory per run.
 function wallClock(result) {
   const { mean, stddev } = result.summary?.time_wall_clock ?? result
-  return { name: result.name ?? result.command, mean, stddev }
+  const memory = result.summary?.memory_peak_resident?.mean ?? average(result.memory_usage_byte)
+  return { name: result.name ?? result.command, mean, stddev, memory }
+}
+
+function average(values) {
+  if (!values?.length) {
+    return undefined
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function formatBytes(bytes) {
+  const megabytes = bytes / 2 ** 20
+  if (megabytes < 1024) {
+    return `${Math.round(megabytes)} MB`
+  }
+  return `${(megabytes / 1024).toFixed(1)} GB`
 }
 
 function formatSeconds(seconds) {
