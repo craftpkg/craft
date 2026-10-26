@@ -10,7 +10,7 @@ TEMP="${TMPDIR:-/tmp}"
 WORK="${BENCH_WORK:-${TEMP%/}/craft-bench}"
 OUT="$BENCH/results/$(date +%Y%m%d-%H%M%S)"
 FIXTURES="small,medium,large"
-SCENARIOS="cold,lockfile,cache,cache+lockfile,up-to-date"
+SCENARIOS="cold,lockfile,cache,cache+lockfile,up-to-date,stale"
 PMS="craft,npm,pnpm,yarn"
 RUNS=5
 
@@ -30,6 +30,7 @@ Scenarios say what an install starts from:
   cache           a warm cache, without a lockfile
   cache+lockfile  a warm cache and a lockfile
   up-to-date      everything already installed
+  stale           the cache as setup left it, past the registry's max-age, without a lockfile
 
 Environment: CRAFT (craft binary, default target/release/craft),
 BENCH_WORK (scratch directory, default \$TMPDIR/craft-bench).
@@ -52,6 +53,15 @@ done
 # switches to frozen-lockfile or immutable installs.
 export CI=false
 
+# Package manager settings from the caller's environment would reach past the
+# per-package-manager HOME, as PNPM_HOME does with pnpm's store.
+while read -r name; do
+  unset "$name"
+done < <(env | grep -ioE '^(npm_config_|pnpm_|yarn_|corepack_)[a-z0-9_]*=' | tr -d =)
+
+# How long the registry lets a cached packument be used without asking again.
+MAX_AGE=300
+
 require() {
   command -v "$1" >/dev/null || { echo "error: $1 is not installed${2:+ ($2)}" >&2; exit 1; }
 }
@@ -73,7 +83,7 @@ install_command() {
   case "$pm" in
     craft) echo "$env CRAFT_HOME='$home/.craft' '$CRAFT' install" ;;
     npm) echo "$env npm_config_cache='$home/.npm' '$TOOLS/npm' install --ignore-scripts --no-audit --no-fund --no-update-notifier" ;;
-    pnpm) echo "$env '$TOOLS/pnpm' install --ignore-scripts" ;;
+    pnpm) echo "$env PNPM_HOME='$home/.pnpm' '$TOOLS/pnpm' install --ignore-scripts" ;;
     yarn) echo "$env YARN_NODE_LINKER=node-modules YARN_ENABLE_SCRIPTS=false YARN_ENABLE_TELEMETRY=false '$TOOLS/yarn' install" ;;
   esac
 }
@@ -90,6 +100,7 @@ prepare_command() {
     cache) echo "$modules '$project/$lockfile'" ;;
     cache+lockfile) echo "$modules && $restore" ;;
     up-to-date) echo "true" ;;
+    stale) echo "$modules '$project/$lockfile' '$home' && $(copy_tree "$home.setup" "$home")" ;;
   esac
 }
 
@@ -98,6 +109,32 @@ needs_warmup() {
     cold|lockfile) return 1 ;;
     *) return 0 ;;
   esac
+}
+
+# Copies a directory keeping its timestamps, cloning files where the filesystem can.
+copy_tree() {
+  local source="$1" dest="$2"
+  case "$(uname)" in
+    Darwin) echo "cp -cpR '$source' '$dest'" ;;
+    *) echo "cp -a --reflink=auto '$source' '$dest'" ;;
+  esac
+}
+
+has_scenario() {
+  [[ ",$SCENARIOS," == *",$1,"* ]]
+}
+
+# Waits until every cache setup wrote is older than the registry's max-age, so a
+# package manager that honours it has to ask the registry again.
+wait_for_stale_caches() {
+  local fixture="$1"
+  local ready=$(($(cat "$WORK/$fixture/setup-done") + MAX_AGE + 1))
+  local now
+  now="$(date +%s)"
+  if [ "$now" -lt "$ready" ]; then
+    echo "Waiting $((ready - now)) s for the caches to pass the registry's max-age"
+    sleep $((ready - now))
+  fi
 }
 
 # Installs a fixture once, keeps the lockfile it wrote, and checks every direct
@@ -118,6 +155,9 @@ setup() {
   mkdir -p "$OUT/$fixture"
   cp "$dir/lockfile" "$OUT/$fixture/$lockfile"
   node "$BENCH/verify.mjs" "$dir/project"
+  if has_scenario stale; then
+    eval "$(copy_tree "$dir/home" "$dir/home.setup")"
+  fi
 }
 
 require node
@@ -157,8 +197,10 @@ for fixture in "${fixtures[@]}"; do
     echo "Setting up $fixture with $pm"
     setup "$fixture" "$pm"
   done
+  date +%s >"$WORK/$fixture/setup-done"
 
   for scenario in "${scenarios[@]}"; do
+    [ "$scenario" = stale ] && wait_for_stale_caches "$fixture"
     args=(--shell=bash --runs "$RUNS" --export-json "$OUT/$fixture/$scenario.json" --export-markdown "$OUT/$fixture/$scenario.md")
     needs_warmup "$scenario" && args+=(--warmup 1)
     for pm in "${pms[@]}"; do
