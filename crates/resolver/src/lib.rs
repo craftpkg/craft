@@ -4,6 +4,7 @@ pub mod graph;
 mod locked;
 mod metadata_cache;
 pub mod npm;
+mod packument;
 pub mod resolved_artifact;
 pub mod resolver;
 mod sources;
