@@ -8,8 +8,8 @@ use node_semver::Version;
 use resolver::{ArtifactSource, DependencyKind, Edge, NodeId, ResolutionGraph, ResolvedNode};
 
 use super::bins::package_bins;
-use super::prune::prune_node_modules;
-use super::virtual_store::VirtualStore;
+use super::prune::prune_to_graph;
+use super::virtual_store::{VirtualStore, entry_name};
 
 const LINK_CONCURRENCY: usize = 16;
 const COPY_EXCLUDED: [&str; 2] = ["node_modules", ".git"];
@@ -51,7 +51,7 @@ impl LinkerPipe {
         imported.with_context(|| format!("failed to import {node_id} into node_modules"))
     }
 
-    /// Links a package's dependencies beside it in its virtual store entry, plus their bins.
+    /// Links a package's dependencies beside it in its virtual store entry.
     async fn link_dependencies(&self, node_id: &NodeId, node: &ResolvedNode) -> Result<()> {
         let is_link = matches!(node.artifact.source, ArtifactSource::Link { .. });
         if is_link || node.dependencies.is_empty() {
@@ -69,6 +69,17 @@ impl LinkerPipe {
             }
             self.link_edge(edge, &modules_dir).await?;
         }
+        Ok(())
+    }
+
+    /// Links the bins of a package's dependencies beside it. Linking a bin makes its file
+    /// executable, so the dependencies must be imported first.
+    async fn link_dependency_bins(&self, node_id: &NodeId, node: &ResolvedNode) -> Result<()> {
+        let is_link = matches!(node.artifact.source, ArtifactSource::Link { .. });
+        if is_link || node.dependencies.is_empty() {
+            return Ok(());
+        }
+        let modules_dir = self.store.modules_dir(node_id, &node.artifact);
         self.link_bins(&node.dependencies, &modules_dir).await
     }
 
@@ -104,17 +115,19 @@ impl LinkerPipe {
             }
         }
 
-        let hoist_dir = self.store.hoist_dir();
+        let hoist_dir = &self.store.hoist_dir();
         let installed = hoisted.into_iter().filter(|(_, edge)| {
             self.graph
                 .target(edge)
                 .is_ok_and(|node| self.supports(node))
         });
-        for (name, edge) in installed {
-            let package_dir = self.target_dir(edge)?;
-            self.link_dir(&package_dir, &hoist_dir.join(name)).await?;
-        }
-        Ok(())
+        let links: Vec<_> = installed
+            .map(|(name, edge)| async move {
+                let package_dir = self.target_dir(edge)?;
+                self.link_dir(&package_dir, &hoist_dir.join(name)).await
+            })
+            .collect();
+        run_all(links).await
     }
 
     /// Links the bins of `edges` into `node_modules/.bin`, one package at a time in name order,
@@ -203,61 +216,66 @@ impl LinkerPipe {
 
 impl Pipeline<()> for LinkerPipe {
     async fn run(&self) -> Result<()> {
-        let node_modules = self.context.node_modules_dir();
-        fsutil::ensure_dir(&node_modules).await?;
+        let node_modules = &self.context.node_modules_dir();
+        let is_fresh = !node_modules.exists();
+        fsutil::ensure_dir(node_modules).await?;
         self.context
             .reporter
             .status(format!("Linking {} packages", self.graph.nodes.len()));
-        let nodes: Vec<(NodeId, ResolvedNode)> = self
-            .graph
-            .nodes
-            .iter()
-            .map(|(id, node)| (id.clone(), node.clone()))
-            .collect();
-
-        run_all(
-            nodes
-                .clone()
-                .into_iter()
-                .map(|(id, node)| async move { self.import_package(&id, &node).await }),
-        )
-        .await?;
-        run_all(
-            nodes
-                .into_iter()
-                .map(|(id, node)| async move { self.link_dependencies(&id, &node).await }),
-        )
-        .await?;
-        self.hoist().await?;
-
-        let node_modules = &node_modules;
+        let nodes = &self.graph.nodes;
         let mut roots = Vec::new();
         for root in &self.graph.roots {
             if self.is_installable(root, "the project")? {
-                roots.push(root.clone());
+                roots.push(root);
             }
         }
-        run_all(
-            roots
-                .into_iter()
-                .map(|root| async move { self.link_edge(&root, node_modules).await }),
-        )
-        .await?;
+
+        let imports: Vec<_> = nodes
+            .iter()
+            .map(|(id, node)| self.import_package(id, node))
+            .collect();
+        let dependency_links: Vec<_> = nodes
+            .iter()
+            .map(|(id, node)| self.link_dependencies(id, node))
+            .collect();
+        let root_links: Vec<_> = roots
+            .iter()
+            .map(|root| self.link_edge(root, node_modules))
+            .collect();
+        let links = async {
+            run_all(dependency_links).await?;
+            self.hoist().await?;
+            run_all(root_links).await
+        };
+        // Imports are cloned one at a time by the filesystem, so links are made meanwhile.
+        futures::try_join!(run_all(imports), links)?;
+        let bins: Vec<_> = nodes
+            .iter()
+            .map(|(id, node)| self.link_dependency_bins(id, node))
+            .collect();
+        run_all(bins).await?;
         self.link_bins(&self.graph.roots, node_modules).await?;
 
+        if is_fresh {
+            return Ok(());
+        }
         let root_names: HashSet<String> = self
             .graph
             .roots
             .iter()
             .map(|root| root.name.clone())
             .collect();
-        prune_node_modules(node_modules, Some(&root_names))
+        let entries: HashSet<String> = nodes
+            .iter()
+            .map(|(id, node)| entry_name(id, &node.artifact))
+            .collect();
+        prune_to_graph(node_modules, &root_names, &entries)
             .await
             .context("failed to prune node_modules")
     }
 }
 
-async fn run_all(tasks: impl Iterator<Item = impl Future<Output = Result<()>>>) -> Result<()> {
+async fn run_all(tasks: Vec<impl Future<Output = Result<()>>>) -> Result<()> {
     let results: Vec<Result<()>> = stream::iter(tasks)
         .buffer_unordered(LINK_CONCURRENCY)
         .collect()
