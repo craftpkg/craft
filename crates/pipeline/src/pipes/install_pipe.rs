@@ -57,6 +57,14 @@ impl InstallPipe {
         self
     }
 
+    /// Resolves the graph, then leaks the pipe instead of dropping it: the command exits soon
+    /// after, and freeing every parsed packument one by one takes about a second on large trees.
+    pub async fn into_graph(self) -> Result<ResolutionGraph> {
+        let graph = self.run().await;
+        std::mem::forget(self);
+        graph
+    }
+
     // async_recursion marks the boxed future it returns `#[must_use]` a second time.
     #[allow(clippy::double_must_use)]
     #[async_recursion::async_recursion]
