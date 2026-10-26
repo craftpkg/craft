@@ -1,0 +1,59 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      fixtures:
+        description: Fixtures to install
+        default: small,medium,large
+      scenarios:
+        description: Scenarios to time
+        default: cold,lockfile,cache,cache+lockfile,up-to-date,stale
+      runs:
+        description: Timed runs per scenario
+        default: "5"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24
+
+    - name: Install hyperfine
+      run: sudo apt-get update && sudo apt-get install -y hyperfine
+
+    - name: Build craft
+      run: cargo build --release -p craft
+
+    - name: Install the package managers
+      working-directory: bench/tools
+      run: ../../target/release/craft ci
+
+    - name: Race
+      env:
+        FIXTURES: ${{ inputs.fixtures }}
+        SCENARIOS: ${{ inputs.scenarios }}
+        RUNS: ${{ inputs.runs }}
+      run: bench/run.sh --fixtures "$FIXTURES" --scenarios "$SCENARIOS" --runs "$RUNS" --out bench/results/ci
+
+    - name: Summarize
+      run: cat bench/results/ci/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload the results
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark
+        path: bench/results/ci

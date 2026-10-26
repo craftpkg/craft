@@ -11,8 +11,8 @@ use bytes::Bytes;
 use contract::{NetworkError, NetworkMode, RegistryConfig, Result, user_agent};
 use reqwest::StatusCode;
 use reqwest::header::{
-    AUTHORIZATION, CACHE_CONTROL, ETAG, HeaderMap, HeaderValue, IF_MODIFIED_SINCE, IF_NONE_MATCH,
-    LAST_MODIFIED, RETRY_AFTER,
+    ACCEPT, AUTHORIZATION, CACHE_CONTROL, ETAG, HeaderMap, HeaderValue, IF_MODIFIED_SINCE,
+    IF_NONE_MATCH, LAST_MODIFIED, RETRY_AFTER,
 };
 use reqwest::{Certificate, Client, ClientBuilder, NoProxy, Proxy, RequestBuilder};
 use serde::de::DeserializeOwned;
@@ -25,6 +25,10 @@ const READ_TIMEOUT: Duration = Duration::from_secs(60);
 const BASE_RETRY_DELAY: Duration = Duration::from_millis(500);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
 const MAX_JITTER_MILLIS: u64 = 250;
+/// Abbreviated packuments carry what installing needs at a fraction of the size; registries
+/// without them answer with the full document.
+const ABBREVIATED_PACKUMENT: &str =
+    "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*";
 
 #[derive(Debug)]
 pub struct Network {
@@ -58,15 +62,15 @@ impl Network {
         }
     }
 
-    /// GETs `url` conditionally on the cached copy's validators: `NotModified` means the cached
-    /// body is still current.
-    pub async fn fetch_revalidated(
+    /// GETs the packument at `url`, abbreviated where the registry has it, conditionally on the
+    /// cached copy's validators: `NotModified` means the cached body is still current.
+    pub async fn fetch_packument(
         &self,
         url: &str,
         cached: Option<&Validators>,
     ) -> Result<Revalidated> {
         self.with_retries(url, || async {
-            let mut request = self.get(url);
+            let mut request = self.get(url).header(ACCEPT, ABBREVIATED_PACKUMENT);
             if let Some(etag) = cached.and_then(|cached| cached.etag.as_deref()) {
                 request = request.header(IF_NONE_MATCH, etag);
             }
@@ -142,7 +146,7 @@ impl Network {
 
 impl Network {
     /// GETs `url` and reads the whole body, with retries.
-    async fn get_body(&self, url: &str) -> Result<Bytes> {
+    pub async fn get_body(&self, url: &str) -> Result<Bytes> {
         self.with_retries(url, || async {
             let response = self.send(url).await?;
             response.bytes().await.map_err(Failure::from_transport)

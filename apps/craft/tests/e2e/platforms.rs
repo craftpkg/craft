@@ -133,6 +133,34 @@ fn locks_every_platform_so_the_lockfile_installs_anywhere() {
 }
 
 #[test]
+fn locks_the_libc_of_linux_packages_it_never_downloads() {
+    let registry = MockRegistry::start();
+    publish_esbuild(&registry);
+    let mac = Project::new(
+        &registry,
+        json!({ "dependencies": { "esbuild": "0.25.0" } }),
+    );
+    craft_for(&mac, "darwin", "arm64", "")
+        .arg("install")
+        .assert()
+        .success();
+    let lock = mac.read_file("craft.lock");
+    let parsed: Value = serde_json::from_str(&lock).expect("craft.lock is JSON");
+    assert_eq!(
+        parsed["packages"]["@esbuild/linux-x64-musl@0.25.0"]["libc"],
+        json!(["musl"])
+    );
+
+    let linux = mac.sibling(json!({ "dependencies": { "esbuild": "0.25.0" } }));
+    linux.write_file("craft.lock", &lock);
+    craft_for(&linux, "linux", "x64", "musl")
+        .args(["install", "--frozen-lockfile"])
+        .assert()
+        .success();
+    assert_eq!(binary(&linux), "linux-x64-musl");
+}
+
+#[test]
 fn skips_optional_dependencies_that_fail_to_install() {
     let registry = MockRegistry::start();
     registry.publish(

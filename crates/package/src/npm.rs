@@ -157,14 +157,6 @@ pub struct PackageDist {
     pub shasum: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct NpmPackage {
-    pub name: String,
-    #[serde(rename = "dist-tags")]
-    pub dist_tags: HashMap<String, String>,
-    pub versions: HashMap<String, PackageJson>,
-}
-
 /// Published manifests are loosely typed: some old ones put objects among their scripts
 /// (`"blanket": { "pattern": … }`). Like npm, only the string entries count.
 fn string_entries<'de, D>(

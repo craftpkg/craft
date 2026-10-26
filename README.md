@@ -21,6 +21,23 @@
 - 🧩 **npm-compatible**: ranges, dist-tags, aliases, git, tarball, `file:` and `link:` dependencies, peers, platform packages, and `.npmrc` registries and auth.
 - 🖥️ **Everywhere**: native binaries for Linux (glibc and musl), macOS and Windows.
 
+## ⚡ Benchmarks
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/public/benchmarks-dark.svg">
+    <img alt="Install times of craft, npm, pnpm and Yarn for a Next.js app with 1,391 packages" src="docs/public/benchmarks-light.svg" width="760">
+  </picture>
+</p>
+
+- **Warm cache:** 1.72 s with a lockfile and 1.78 s without, the fastest of the four. pnpm takes 1.80 s and 1.91 s, npm and Yarn 7–12 s.
+- **Cold install:** 18.4 s, against pnpm's 28.8 s, Yarn's 30.0 s and npm's 63.0 s.
+- **Already installed:** 6 ms, 6× faster than pnpm and over 100× faster than npm and Yarn.
+- **Memory:** the leanest of the four in every scenario; 71 MB with a warm cache, where npm peaks at 2.9 GB.
+- **Behind pnpm** once cached metadata is older than the registry's 5-minute `max-age`: craft checks every package with the registry and takes 7.35 s, while pnpm trusts its cache and takes 1.80 s.
+
+Every project, scenario and peak memory, and how it's kept fair: [Benchmarks](https://craftpkg.github.io/craft/guide/benchmarks) on the website, or the full tables in [`bench/README.md`](bench/README.md).
+
 ## 🚀 Installation
 
 ```bash

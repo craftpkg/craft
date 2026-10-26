@@ -10,12 +10,13 @@ use network::Revalidated;
 use std::path::PathBuf;
 
 use crate::metadata_cache::{CachedPackument, MetadataCache};
+use crate::packument::Packument;
 use network::{Integrity, Network};
 use node_semver::{Range, Version};
-use package::{NpmPackage, PlatformConstraints, VersionRequirement};
+use package::{PackageJson, PlatformConstraints, VersionRequirement};
 
 /// One fetch per package name, shared by every concurrent request for it.
-type PackumentCell = Arc<OnceCell<Arc<NpmPackage>>>;
+type PackumentCell = Arc<OnceCell<Arc<Packument>>>;
 
 #[derive(Debug)]
 pub struct NpmResolver {
@@ -37,7 +38,7 @@ impl NpmResolver {
 
     /// The package's metadata, fetched once per install however many ranges ask for it. A
     /// failed fetch is not remembered, so a later request tries again.
-    async fn packument(&self, name: &str) -> Result<Arc<NpmPackage>> {
+    async fn packument(&self, name: &str) -> Result<Arc<Packument>> {
         let cell = {
             let mut packuments = self
                 .packuments
@@ -51,13 +52,14 @@ impl NpmResolver {
 
     /// From the metadata cache when the network mode allows or the registry says it's still
     /// current, from the registry otherwise.
-    async fn load_packument(&self, name: &str) -> Result<Arc<NpmPackage>> {
+    async fn load_packument(&self, name: &str) -> Result<Arc<Packument>> {
         let registry = self.registry.registry_for(name);
         let url = packument_url(registry, name);
         let cached = self.cache.read(registry, name).await;
-        let cached_packument = cached
-            .as_ref()
-            .and_then(|cached| serde_json::from_slice::<NpmPackage>(&cached.body).ok());
+        let cached_packument = match &cached {
+            Some(cached) => Packument::cached(cached.path.clone()).await.ok(),
+            None => None,
+        };
 
         let may_use_cache = match self.registry.network_mode {
             NetworkMode::Offline | NetworkMode::PreferOffline => true,
@@ -78,7 +80,7 @@ impl NpmResolver {
             .flatten();
         let revalidated = self
             .client
-            .fetch_revalidated(&url, validators)
+            .fetch_packument(&url, validators)
             .await
             .map_err(|error| registry_error(name, registry, error))?;
         match (revalidated, cached_packument) {
@@ -87,9 +89,12 @@ impl NpmResolver {
                 Ok(Arc::new(packument))
             }
             (Revalidated::Fresh { body, validators }, _) => {
-                let packument: NpmPackage = serde_json::from_slice(&body)
-                    .map_err(|error| registry_error(name, registry, error.into()))?;
-                self.cache.write(registry, name, &body, validators).await;
+                let encoded = Packument::encode(&body)
+                    .map_err(|error| registry_error(name, registry, error))?;
+                let packument = match self.cache.write(registry, name, &encoded, validators).await {
+                    Some(path) => Packument::cached(path).await?,
+                    None => Packument::in_memory(encoded)?,
+                };
                 Ok(Arc::new(packument))
             }
             (Revalidated::NotModified(_), None) => Err(anyhow::anyhow!(
@@ -103,15 +108,16 @@ impl NpmResolver {
         name: &str,
         requirement: &VersionRequirement,
     ) -> Result<ResolvedArtifact> {
-        let npm_package = self.packument(name).await?;
+        let packument = self.packument(name).await?;
 
-        let version = select_version(&npm_package, requirement)
+        let version = select_version(&packument, requirement)
             .ok_or_else(|| anyhow::anyhow!("no version of {name} matches {requirement}"))?;
 
-        let pkg_json = npm_package
-            .versions
-            .get(&version)
-            .ok_or_else(|| anyhow::anyhow!("Package JSON not found for {name}@{version}"))?;
+        let pkg_json = packument
+            .manifest(&version)
+            .await
+            .map_err(|error| error.context(format!("could not read {name}@{version}")))?;
+        let pkg_json = self.with_libc(name, &version, pkg_json).await;
 
         let dist = pkg_json
             .dist
@@ -125,13 +131,48 @@ impl NpmResolver {
                 tarball_url: dist.tarball.clone(),
             },
             integrity: Integrity::from_dist(dist.integrity.as_deref(), dist.shasum.as_deref())?,
-            platform: PlatformConstraints::from_manifest(pkg_json),
-            package: Some(pkg_json.clone()),
+            platform: PlatformConstraints::from_manifest(&pkg_json),
+            package: Some(pkg_json),
         };
 
         debug::trace!("Resolved {name}@{requirement} to {version}");
 
         Ok(resolved)
+    }
+
+    /// Abbreviated manifests leave out `libc`, which tells a Linux package's glibc and musl
+    /// builds apart, so a Linux package's full manifest is fetched once and kept. Without it the
+    /// package counts as installable with either libc.
+    async fn with_libc(&self, name: &str, version: &str, manifest: PackageJson) -> PackageJson {
+        let has_libc = manifest.other.contains_key("libc");
+        let is_for_linux = PlatformConstraints::from_manifest(&manifest)
+            .os
+            .iter()
+            .any(|os| os == "linux");
+        if has_libc || !is_for_linux {
+            return manifest;
+        }
+        match self.full_manifest(name, version).await {
+            Ok(full) => full,
+            Err(error) => {
+                debug::warning!("Could not read the libc of {name}@{version}: {error:#}");
+                manifest
+            }
+        }
+    }
+
+    async fn full_manifest(&self, name: &str, version: &str) -> Result<PackageJson> {
+        let registry = self.registry.registry_for(name);
+        if let Some(cached) = self.cache.read_version(registry, name, version).await {
+            return Ok(serde_json::from_slice(&cached)?);
+        }
+        let url = format!("{}/{version}", packument_url(registry, name));
+        let body = self.client.get_body(&url).await?;
+        let manifest = serde_json::from_slice(&body)?;
+        self.cache
+            .write_version(registry, name, version, &body)
+            .await;
+        Ok(manifest)
     }
 }
 
@@ -164,14 +205,14 @@ fn registry_error(name: &str, registry: &str, error: anyhow::Error) -> anyhow::E
 
 /// Picks the published version npm would install: the version a tag points at, or for a
 /// range the `latest` tag when it satisfies the range, otherwise the highest satisfying version.
-fn select_version(npm_package: &NpmPackage, requirement: &VersionRequirement) -> Option<String> {
+fn select_version(packument: &Packument, requirement: &VersionRequirement) -> Option<String> {
     match requirement {
-        VersionRequirement::Exact(version) => published_versions(npm_package)
+        VersionRequirement::Exact(version) => published_versions(packument)
             .find(|(published, _)| published == version)
             .map(|(_, key)| key.clone()),
-        VersionRequirement::Tag(tag) => npm_package.dist_tags.get(tag).cloned(),
+        VersionRequirement::Tag(tag) => packument.dist_tags.get(tag).cloned(),
         VersionRequirement::Range(range) => {
-            let latest = npm_package.dist_tags.get("latest");
+            let latest = packument.dist_tags.get("latest");
             let latest_satisfies = latest
                 .and_then(|latest| Version::parse(latest).ok())
                 .is_some_and(|latest| range.satisfies(&latest));
@@ -179,23 +220,23 @@ fn select_version(npm_package: &NpmPackage, requirement: &VersionRequirement) ->
                 return latest.cloned();
             }
 
-            highest_satisfying(npm_package, range)
+            highest_satisfying(packument, range)
         }
     }
 }
 
-fn highest_satisfying(npm_package: &NpmPackage, range: &Range) -> Option<String> {
-    published_versions(npm_package)
+fn highest_satisfying(packument: &Packument, range: &Range) -> Option<String> {
+    published_versions(packument)
         .filter(|(version, _)| range.satisfies(version))
         .max_by(|(a, _), (b, _)| a.cmp(b))
         .map(|(_, key)| key.clone())
 }
 
 /// Published versions that parse as semver, paired with their key in the packument.
-fn published_versions(npm_package: &NpmPackage) -> impl Iterator<Item = (Version, &String)> {
-    npm_package
+fn published_versions(packument: &Packument) -> impl Iterator<Item = (Version, &String)> {
+    packument
         .versions
-        .keys()
+        .iter()
         .filter_map(|key| Version::parse(key).ok().map(|version| (version, key)))
 }
 
@@ -340,7 +381,7 @@ mod tests {
         );
     }
 
-    fn select(npm_package: &NpmPackage, spec: &str) -> Option<String> {
+    fn select(npm_package: &Packument, spec: &str) -> Option<String> {
         select_version(npm_package, &requirement(spec))
     }
 
@@ -349,17 +390,17 @@ mod tests {
         dependency.registry_target().unwrap().1.clone()
     }
 
-    fn packument(latest: &str, versions: &[&str]) -> NpmPackage {
+    fn packument(latest: &str, versions: &[&str]) -> Packument {
         let versions: serde_json::Map<String, serde_json::Value> = versions
             .iter()
             .map(|version| (version.to_string(), json!({ "version": version })))
             .collect();
-
-        serde_json::from_value(json!({
+        let body = json!({
             "name": "pkg",
             "dist-tags": { "latest": latest },
             "versions": versions,
-        }))
-        .unwrap()
+        });
+
+        Packument::in_memory(Packument::encode(body.to_string().as_bytes()).unwrap()).unwrap()
     }
 }

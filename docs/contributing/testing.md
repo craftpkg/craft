@@ -4,6 +4,7 @@
 make                 # fmt check, clippy, unit and end-to-end tests
 make real-world      # scenarios against registry.npmjs.org and GitHub
 docker/windows/test.sh   # the whole suite built for Windows, run under Wine
+make bench           # race craft against npm, pnpm and Yarn
 ```
 
 ## Unit tests
@@ -48,3 +49,7 @@ docker/windows/test.sh run::         # arguments go to each test executable
 ```
 
 Wine is not Windows: CI's `windows-latest` job has the final word. On Apple Silicon, Docker's Rosetta emulation can crash Wine processes; switching Docker Desktop to QEMU emulation avoids that.
+
+## Benchmarks
+
+`make bench` times `craft install` against npm, pnpm and Yarn on three real projects, from a cold machine to an already installed project, with hyperfine. The **Benchmark** workflow runs the same on a GitHub-hosted runner. See [`bench/README.md`](https://github.com/craftpkg/craft/blob/main/bench/README.md) for the fixtures, the scenarios and how each package manager is kept on equal terms.

@@ -6,26 +6,36 @@ use tokio::fs;
 
 use super::virtual_store::{HOIST_DIR, INSTALLED_STATE, VIRTUAL_STORE_DIR};
 
-/// Removes what the project no longer uses from `node_modules`: top-level links to packages
-/// outside `keep_roots` (when given), every virtual store entry no top-level link reaches,
-/// and links left dangling by those removals. Only symlinks craft could have made are removed at
-/// the top level; dot entries such as `.cache` and real directories are left alone.
-pub async fn prune_node_modules(
-    node_modules: &Path,
-    keep_roots: Option<&HashSet<String>>,
-) -> io::Result<()> {
-    if let Some(keep_roots) = keep_roots {
-        for (name, path) in package_entries(node_modules).await? {
-            let is_kept = keep_roots.contains(&name);
-            if !is_kept && fs::symlink_metadata(&path).await?.is_symlink() {
-                debug::info!("Pruning {}", name);
-                fsutil::remove_entry(&path).await?;
-            }
-        }
-    }
-
+/// Removes what the project no longer uses from `node_modules`: every virtual store entry no
+/// top-level link reaches, and links left dangling by that.
+pub async fn prune_node_modules(node_modules: &Path) -> io::Result<()> {
     let virtual_store = node_modules.join(VIRTUAL_STORE_DIR);
     let reachable = reachable_entries(node_modules, &virtual_store).await?;
+    remove_entries_outside(node_modules, &reachable).await
+}
+
+/// Removes what `node_modules` holds beyond a graph just linked into it: top-level links to
+/// packages outside `roots`, virtual store entries outside `entries`, and links left dangling by
+/// those removals. Only symlinks craft could have made are removed at the top level; dot entries
+/// such as `.cache` and real directories are left alone.
+pub(crate) async fn prune_to_graph(
+    node_modules: &Path,
+    roots: &HashSet<String>,
+    entries: &HashSet<String>,
+) -> io::Result<()> {
+    for (name, path) in package_entries(node_modules).await? {
+        let is_kept = roots.contains(&name);
+        if !is_kept && fs::symlink_metadata(&path).await?.is_symlink() {
+            debug::info!("Pruning {}", name);
+            fsutil::remove_entry(&path).await?;
+        }
+    }
+    remove_entries_outside(node_modules, entries).await
+}
+
+/// Removes every virtual store entry not in `kept`, then the links left dangling.
+async fn remove_entries_outside(node_modules: &Path, kept: &HashSet<String>) -> io::Result<()> {
+    let virtual_store = node_modules.join(VIRTUAL_STORE_DIR);
     let mut entries = match fs::read_dir(&virtual_store).await {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -34,7 +44,7 @@ pub async fn prune_node_modules(
     while let Some(entry) = entries.next_entry().await? {
         let name = entry.file_name().to_string_lossy().into_owned();
         let is_craft_file = name == HOIST_DIR || name == INSTALLED_STATE;
-        let is_unused = !is_craft_file && !reachable.contains(&name);
+        let is_unused = !is_craft_file && !kept.contains(&name);
         if is_unused {
             debug::info!("Pruning {}", name);
             fsutil::remove_entry(&entry.path()).await?;
@@ -187,7 +197,7 @@ mod tests {
         let node_modules = dir.path().join("node_modules");
         layout(&node_modules);
 
-        prune_node_modules(&node_modules, None).await.unwrap();
+        prune_node_modules(&node_modules).await.unwrap();
 
         let craft = node_modules.join(".craft");
         assert!(craft.join("a@1.0.0").exists());
@@ -195,6 +205,26 @@ mod tests {
         assert!(!craft.join("c@1.0.0").exists());
         assert!(std::fs::symlink_metadata(craft.join("node_modules/c")).is_err());
         assert!(node_modules.join(".cache/tool").exists());
+    }
+
+    #[tokio::test]
+    async fn test_pruning_to_a_graph_keeps_its_entries_even_when_unlinked() {
+        let dir = tempfile::tempdir().unwrap();
+        let node_modules = dir.path().join("node_modules");
+        layout(&node_modules);
+        let roots = HashSet::from(["a".to_string()]);
+        let entries = HashSet::from(["a@1.0.0".to_string(), "c@1.0.0".to_string()]);
+
+        prune_to_graph(&node_modules, &roots, &entries)
+            .await
+            .unwrap();
+
+        let craft = node_modules.join(".craft");
+        assert!(craft.join("a@1.0.0").exists());
+        assert!(!craft.join("b@1.0.0").exists());
+        assert!(std::fs::symlink_metadata(craft.join("a@1.0.0/node_modules/b")).is_ok());
+        assert!(craft.join("c@1.0.0").exists());
+        assert!(craft.join("node_modules/c").exists());
     }
 
     #[tokio::test]
@@ -208,7 +238,7 @@ mod tests {
         std::fs::create_dir_all(node_modules.join(".bin")).unwrap();
         symlink("../a/cli.js", node_modules.join(".bin/a")).unwrap();
 
-        prune_node_modules(&node_modules, Some(&HashSet::new()))
+        prune_to_graph(&node_modules, &HashSet::new(), &HashSet::new())
             .await
             .unwrap();
 

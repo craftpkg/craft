@@ -39,7 +39,7 @@ impl Actor<RemoveActorPayload> for RemovePackageActor {
                 debug::warning!("Package {} not found in node_modules", package_name);
             }
         }
-        prune_node_modules(&node_modules, None).await?;
+        prune_node_modules(&node_modules).await?;
 
         let package_json_path = self.context.package_json_path();
         if !package_json_path.exists() {

@@ -28,6 +28,17 @@ fn installed_twice(registry: &MockRegistry, second_args: &[&str]) -> Project {
 }
 
 #[test]
+fn requests_abbreviated_metadata() {
+    let registry = MockRegistry::start();
+    publish_debug(&registry);
+    let project = Project::new(&registry, json!({ "dependencies": { "debug": "^4.0.0" } }));
+
+    project.craft().arg("install").assert().success();
+
+    assert_eq!(registry.abbreviated_responses(), 2);
+}
+
+#[test]
 fn revalidates_cached_metadata_with_etags() {
     let registry = MockRegistry::start();
     publish_debug(&registry);
