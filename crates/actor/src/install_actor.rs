@@ -67,7 +67,7 @@ impl Actor<InstallOptions> for InstallActor {
         if is_frozen {
             pipe = pipe.frozen();
         }
-        let graph = pipe.run().await?;
+        let graph = pipe.into_graph().await?;
         LinkerPipe::new(&self.context, graph.clone()).run().await?;
         run_install_scripts(&self.context, graph.clone(), &package_json, &policy, true).await?;
 
