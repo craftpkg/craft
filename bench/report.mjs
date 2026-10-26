@@ -6,6 +6,7 @@ const SCENARIOS = {
   cold: 'Cold: no cache, no lockfile',
   lockfile: 'Lockfile, empty cache',
   cache: 'Warm cache, no lockfile',
+  stale: 'Warm cache past its max-age, no lockfile',
   'cache+lockfile': 'Warm cache and lockfile',
   'up-to-date': 'Already installed',
 }
