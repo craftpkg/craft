@@ -12,6 +12,25 @@ use sha2::{Digest, Sha512};
 
 use crate::package_fixture::{PackageFixture, unscoped_name};
 
+const ABBREVIATED_PACKUMENT: &str = "application/vnd.npm.install-v1+json";
+const ABBREVIATED_FIELDS: [&str; 15] = [
+    "name",
+    "version",
+    "deprecated",
+    "dependencies",
+    "optionalDependencies",
+    "devDependencies",
+    "bundleDependencies",
+    "peerDependencies",
+    "peerDependenciesMeta",
+    "bin",
+    "directories",
+    "dist",
+    "engines",
+    "os",
+    "cpu",
+];
+
 /// An npm-compatible registry on `127.0.0.1` serving packuments and tarballs built from
 /// [`PackageFixture`]s. Stops when dropped.
 pub struct MockRegistry {
@@ -34,6 +53,14 @@ struct MockResponse {
 }
 
 #[derive(Default)]
+struct RequestHeaders {
+    authorization: Option<String>,
+    user_agent: Option<String>,
+    if_none_match: Option<String>,
+    wants_abbreviated: bool,
+}
+
+#[derive(Default)]
 struct RegistryState {
     packuments: HashMap<String, Value>,
     tarballs: HashMap<String, Vec<u8>>,
@@ -48,6 +75,7 @@ struct RegistryState {
     pending_failures: Option<(usize, u16, Option<u64>)>,
     in_flight: usize,
     max_in_flight: usize,
+    abbreviated: usize,
     /// `Cache-Control: max-age` to send with packuments.
     max_age: Option<u64>,
     not_modified: usize,
@@ -192,6 +220,11 @@ impl MockRegistry {
         lock(&self.state).not_modified
     }
 
+    /// How many packuments were served abbreviated, as asked for with `Accept`.
+    pub fn abbreviated_responses(&self) -> usize {
+        lock(&self.state).abbreviated
+    }
+
     /// The most requests that were being answered at the same time.
     pub fn max_concurrent_requests(&self) -> usize {
         lock(&self.state).max_in_flight
@@ -229,13 +262,13 @@ impl Drop for MockRegistry {
 }
 
 impl RegistryState {
-    fn respond_authorized(
-        &mut self,
-        url: &str,
-        authorization: Option<String>,
-        user_agent: Option<String>,
-        if_none_match: Option<String>,
-    ) -> MockResponse {
+    fn respond_authorized(&mut self, url: &str, request: RequestHeaders) -> MockResponse {
+        let RequestHeaders {
+            authorization,
+            user_agent,
+            if_none_match,
+            wants_abbreviated,
+        } = request;
         self.user_agents.push(user_agent);
         if let Some((remaining, status, retry_after)) = self.pending_failures.take() {
             if remaining > 1 {
@@ -265,7 +298,7 @@ impl RegistryState {
                 ..MockResponse::default()
             };
         }
-        let response = self.respond(url);
+        let response = self.respond(url, wants_abbreviated);
         let is_not_modified = response.etag.is_some() && response.etag == if_none_match;
         if is_not_modified {
             self.not_modified += 1;
@@ -278,7 +311,7 @@ impl RegistryState {
         response
     }
 
-    fn respond(&mut self, url: &str) -> MockResponse {
+    fn respond(&mut self, url: &str, wants_abbreviated: bool) -> MockResponse {
         let path = decode_path(url);
         self.requested_paths.push(path.clone());
 
@@ -291,12 +324,32 @@ impl RegistryState {
             };
         }
 
-        match self.packuments.get(path.trim_start_matches('/')) {
+        let name = path.trim_start_matches('/');
+        let version_manifest = name.rsplit_once('/').and_then(|(name, version)| {
+            let manifest = self.packuments.get(name)?.get("versions")?.get(version)?;
+            Some(manifest.to_string().into_bytes())
+        });
+        if let Some(body) = version_manifest {
+            return MockResponse {
+                status: 200,
+                content_type: "application/json",
+                body,
+                ..MockResponse::default()
+            };
+        }
+
+        match self.packuments.get(name) {
             Some(packument) => {
-                let body = packument.to_string().into_bytes();
+                let (content_type, body) = if wants_abbreviated {
+                    self.abbreviated += 1;
+                    (ABBREVIATED_PACKUMENT, abbreviated(packument).to_string())
+                } else {
+                    ("application/json", packument.to_string())
+                };
+                let body = body.into_bytes();
                 MockResponse {
                     status: 200,
-                    content_type: "application/json",
+                    content_type,
                     etag: Some(format!("\"{}\"", sri_sha512(&body))),
                     max_age: self.max_age,
                     body,
@@ -321,6 +374,36 @@ fn lock(state: &Mutex<RegistryState>) -> MutexGuard<'_, RegistryState> {
 
 fn tarball_path(name: &str, version: &str) -> String {
     format!("/{name}/-/{}-{version}.tgz", unscoped_name(name))
+}
+
+/// The packument as the npm registry abbreviates it: only what installing needs, so no
+/// `scripts` and no `libc`.
+fn abbreviated(packument: &Value) -> Value {
+    let versions: Map<String, Value> = packument["versions"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(version, manifest)| (version.clone(), abbreviated_manifest(manifest)))
+        .collect();
+    json!({
+        "name": packument["name"],
+        "dist-tags": packument["dist-tags"],
+        "versions": versions,
+    })
+}
+
+fn abbreviated_manifest(manifest: &Value) -> Value {
+    let mut kept: Map<String, Value> = ABBREVIATED_FIELDS
+        .iter()
+        .filter_map(|field| Some((field.to_string(), manifest.get(*field)?.clone())))
+        .collect();
+    let has_install_script = ["preinstall", "install", "postinstall"]
+        .iter()
+        .any(|event| manifest["scripts"].get(event).is_some());
+    if has_install_script {
+        kept.insert("hasInstallScript".to_string(), json!(true));
+    }
+    Value::Object(kept)
 }
 
 fn empty_packument(name: &str) -> Value {
@@ -379,9 +462,7 @@ fn answer<S: Read + Write>(stream: &mut S, state: &Mutex<RegistryState>) {
         return;
     }
     let mut header_line = String::new();
-    let mut authorization = None;
-    let mut user_agent = None;
-    let mut if_none_match = None;
+    let mut headers = RequestHeaders::default();
     loop {
         header_line.clear();
         let is_end_of_headers = matches!(reader.read_line(&mut header_line), Ok(0) | Err(_))
@@ -392,11 +473,13 @@ fn answer<S: Read + Write>(stream: &mut S, state: &Mutex<RegistryState>) {
         if let Some((name, value)) = header_line.split_once(':') {
             let name = name.trim();
             if name.eq_ignore_ascii_case("authorization") {
-                authorization = Some(value.trim().to_string());
+                headers.authorization = Some(value.trim().to_string());
             } else if name.eq_ignore_ascii_case("user-agent") {
-                user_agent = Some(value.trim().to_string());
+                headers.user_agent = Some(value.trim().to_string());
             } else if name.eq_ignore_ascii_case("if-none-match") {
-                if_none_match = Some(value.trim().to_string());
+                headers.if_none_match = Some(value.trim().to_string());
+            } else if name.eq_ignore_ascii_case("accept") {
+                headers.wants_abbreviated = value.contains(ABBREVIATED_PACKUMENT);
             }
         }
     }
@@ -412,7 +495,7 @@ fn answer<S: Read + Write>(stream: &mut S, state: &Mutex<RegistryState>) {
     }
     .to_string();
     drop(reader);
-    let response = lock(state).respond_authorized(&path, authorization, user_agent, if_none_match);
+    let response = lock(state).respond_authorized(&path, headers);
     let reason = match response.status {
         200 => "OK",
         304 => "Not Modified",
