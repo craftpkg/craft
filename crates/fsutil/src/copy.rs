@@ -11,6 +11,10 @@ static STAGING_COUNTER: AtomicUsize = AtomicUsize::new(0);
 /// (unsupported filesystem, different device) it is not retried for every file.
 static STORE_IMPORT_METHOD: AtomicU8 = AtomicU8::new(Method::Clone as u8);
 static SOURCE_IMPORT_METHOD: AtomicU8 = AtomicU8::new(Method::Clone as u8);
+/// Whether whole directories can still be cloned in one call; off once the filesystem says it
+/// can't, like the per-file methods.
+#[cfg(target_os = "macos")]
+static TREE_CLONE_WORKS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
@@ -92,6 +96,10 @@ async fn stage(
     let (source_dir, staging_dir) = (source.to_path_buf(), staging.clone());
     let excluded: Vec<String> = excluded.iter().map(|name| name.to_string()).collect();
     let copied = tokio::task::spawn_blocking(move || {
+        let is_whole_tree = excluded.is_empty();
+        if is_whole_tree && clone_tree(&source_dir, &staging_dir) {
+            return Ok(());
+        }
         copy_tree(&source_dir, &staging_dir, &excluded, import)
     })
     .await
@@ -102,6 +110,32 @@ async fn stage(
         return Err(error);
     }
     Ok(staging)
+}
+
+/// Clones the directory `source` as `dest` with a single `clonefile`, far cheaper than a clone per
+/// file. Leaves nothing at `dest` when it fails, so the caller can copy instead.
+#[cfg(target_os = "macos")]
+fn clone_tree(source: &Path, dest: &Path) -> bool {
+    if !TREE_CLONE_WORKS.load(Ordering::Relaxed) {
+        return false;
+    }
+    let Err(error) = reflink_copy::reflink(source, dest) else {
+        return true;
+    };
+    let is_unsupported = matches!(
+        error.kind(),
+        io::ErrorKind::Unsupported | io::ErrorKind::CrossesDevices
+    );
+    if is_unsupported {
+        TREE_CLONE_WORKS.store(false, Ordering::Relaxed);
+    }
+    let _ = fs::remove_dir_all(dest);
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+fn clone_tree(_source: &Path, _dest: &Path) -> bool {
+    false
 }
 
 fn copy_tree(source: &Path, dest: &Path, excluded: &[String], import: Import) -> io::Result<()> {
@@ -266,6 +300,26 @@ mod tests {
             PathBuf::from("lib/index.js")
         );
         assert!(dest.join("marker").exists());
+        assert_eq!(fs::read_dir(dest.parent().unwrap()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_imports_without_hardlinks_never_share_the_store_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_entry = dir.path().join("store/pkg@1.0.0-abc");
+        fs::create_dir_all(store_entry.join("lib")).unwrap();
+        fs::write(store_entry.join("lib/index.js"), "original").unwrap();
+        let dest = dir
+            .path()
+            .join("app/node_modules/.craft/pkg@1.0.0/node_modules/pkg");
+
+        import_dir(&store_entry, &dest, false).await.unwrap();
+        fs::write(dest.join("lib/index.js"), "built").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(store_entry.join("lib/index.js")).unwrap(),
+            "original"
+        );
         assert_eq!(fs::read_dir(dest.parent().unwrap()).unwrap().count(), 1);
     }
 
