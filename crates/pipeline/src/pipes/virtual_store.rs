@@ -65,7 +65,7 @@ impl VirtualStore {
 /// The instance id for registry packages — `<name>@<version>`, plus `_<peer>@<version>` for
 /// each resolved peer — with `/` escaped (`@scope/x` → `@scope+x`); other sources are told apart
 /// by a hash of their id.
-fn entry_name(node_id: &NodeId, artifact: &ResolvedArtifact) -> String {
+pub(crate) fn entry_name(node_id: &NodeId, artifact: &ResolvedArtifact) -> String {
     let name = artifact.name.replace('/', "+");
     let source_hash = || short_hash(&node_id.to_string());
     let entry = match &artifact.source {
