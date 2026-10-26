@@ -124,6 +124,22 @@ has_scenario() {
   [[ ",$SCENARIOS," == *",$1,"* ]]
 }
 
+# Joins each package manager's hyperfine results for a scenario into one file.
+merge_results() {
+  local dir="$1" scenario="$2"
+  local parts=() pm
+  for pm in "${pms[@]}"; do
+    parts+=("$dir/$scenario.$pm.json")
+  done
+  node -e '
+    const { readFileSync, writeFileSync } = require("node:fs")
+    const [out, ...parts] = process.argv.slice(1)
+    const results = parts.flatMap((part) => JSON.parse(readFileSync(part, "utf8")).results)
+    writeFileSync(out, JSON.stringify({ results }, null, 2))
+  ' "$dir/$scenario.json" "${parts[@]}"
+  rm "${parts[@]}"
+}
+
 # Waits until every cache setup wrote is older than the registry's max-age, so a
 # package manager that honours it has to ask the registry again.
 wait_for_stale_caches() {
@@ -156,8 +172,10 @@ setup() {
   cp "$dir/lockfile" "$OUT/$fixture/$lockfile"
   node "$BENCH/verify.mjs" "$dir/project"
   if has_scenario stale; then
+    rm -rf "$dir/home.setup"
     eval "$(copy_tree "$dir/home" "$dir/home.setup")"
   fi
+  date +%s >"$WORK/$fixture/setup-done"
 }
 
 require node
@@ -197,21 +215,26 @@ for fixture in "${fixtures[@]}"; do
     echo "Setting up $fixture with $pm"
     setup "$fixture" "$pm"
   done
-  date +%s >"$WORK/$fixture/setup-done"
 
   for scenario in "${scenarios[@]}"; do
     [ "$scenario" = stale ] && wait_for_stale_caches "$fixture"
-    args=(--shell=bash --runs "$RUNS" --export-json "$OUT/$fixture/$scenario.json" --export-markdown "$OUT/$fixture/$scenario.md")
-    needs_warmup "$scenario" && args+=(--warmup 1)
+    echo
+    echo "=== $fixture: $scenario"
     for pm in "${pms[@]}"; do
+      # Setting up every package manager takes minutes on large fixtures, long
+      # enough for the first one's metadata to pass max-age during its runs.
+      if [ "$scenario" = cache ]; then
+        echo "Setting up $fixture with $pm again, so its metadata is within max-age"
+        setup "$fixture" "$pm"
+      fi
       dir="$WORK/$fixture/$pm"
       project="$dir/project"
       prepare="$(prepare_command "$scenario" "$project" "$dir/home" "$(lockfile_of "$pm")" "$dir/lockfile")"
-      args+=(--prepare "$prepare" --command-name "$pm" "cd '$project' && $(install_command "$pm" "$dir/home")")
+      args=(--shell=bash --runs "$RUNS" --export-json "$OUT/$fixture/$scenario.$pm.json")
+      needs_warmup "$scenario" && args+=(--warmup 1)
+      hyperfine "${args[@]}" --prepare "$prepare" --command-name "$pm" "cd '$project' && $(install_command "$pm" "$dir/home")"
     done
-    echo
-    echo "=== $fixture: $scenario"
-    hyperfine "${args[@]}"
+    merge_results "$OUT/$fixture" "$scenario"
   done
 done
 
