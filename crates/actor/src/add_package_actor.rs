@@ -60,7 +60,7 @@ impl Actor<AddActorPayload> for AddPackageActor {
 
         let mut graph = InstallPipe::new(&self.context, [existing, added.clone()].concat())
             .with_lockfile(lockfile.as_ref())
-            .run()
+            .into_graph()
             .await?;
         let added_roots: Vec<Edge> = added
             .iter()
