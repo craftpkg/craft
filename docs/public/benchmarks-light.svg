@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="648" viewBox="0 0 760 648" role="img" aria-label="craft, npm, pnpm and Yarn install times">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #1f2328; }
+  .heading { font-size: 18px; font-weight: 600; }
+  .note { font-size: 12px; fill: #656d76; }
+  .title { font-size: 14px; font-weight: 600; }
+  .pm { font-size: 13px; }
+  .value { font-size: 13px; font-variant-numeric: tabular-nums; }
+  .craft { font-weight: 700; fill: #c2410c; }
+  .ratio { fill: #656d76; font-weight: 400; }
+</style>
+<text x="0" y="22" class="heading">Installing a 1,391-package Next.js app</text>
+<text x="0" y="42" class="note">Mean wall time, lower is better · macOS, Apple M5 Max, 18 cores, 48 GB · 2026-10-26</text>
+<text x="0" y="70" class="title">Warm cache and lockfile</text>
+<text x="0" y="93" class="pm craft">craft</text>
+<rect x="64" y="80" width="117.0" height="18" rx="4" fill="#f07020"/>
+<text x="188.96185395710177" y="93" class="value craft">1.72 s <tspan class="ratio">fastest</tspan></text>
+<text x="0" y="119" class="pm">npm</text>
+<rect x="64" y="106" width="494.0" height="18" rx="4" fill="#d0d7de"/>
+<text x="565.9814313041688" y="119" class="value">7.26 s <tspan class="ratio">4.2×</tspan></text>
+<text x="0" y="145" class="pm">pnpm</text>
+<rect x="64" y="132" width="122.6" height="18" rx="4" fill="#d0d7de"/>
+<text x="194.58408069126438" y="145" class="value">1.80 s <tspan class="ratio">1.05×</tspan></text>
+<text x="0" y="171" class="pm">yarn</text>
+<rect x="64" y="158" width="522.0" height="18" rx="4" fill="#d0d7de"/>
+<text x="594" y="171" class="value">7.67 s <tspan class="ratio">4.5×</tspan></text>
+<text x="0" y="222" class="title">Warm cache, no lockfile</text>
+<text x="0" y="245" class="pm craft">craft</text>
+<rect x="64" y="232" width="75.2" height="18" rx="4" fill="#f07020"/>
+<text x="147.17764878479377" y="245" class="value craft">1.78 s <tspan class="ratio">fastest</tspan></text>
+<text x="0" y="271" class="pm">npm</text>
+<rect x="64" y="258" width="522.0" height="18" rx="4" fill="#d0d7de"/>
+<text x="594" y="271" class="value">12.38 s <tspan class="ratio">6.9×</tspan></text>
+<text x="0" y="297" class="pm">pnpm</text>
+<rect x="64" y="284" width="80.7" height="18" rx="4" fill="#d0d7de"/>
+<text x="152.6719510419345" y="297" class="value">1.91 s <tspan class="ratio">1.07×</tspan></text>
+<text x="0" y="323" class="pm">yarn</text>
+<rect x="64" y="310" width="403.9" height="18" rx="4" fill="#d0d7de"/>
+<text x="475.8617764014217" y="323" class="value">9.58 s <tspan class="ratio">5.4×</tspan></text>
+<text x="0" y="374" class="title">Cold: no cache, no lockfile</text>
+<text x="0" y="397" class="pm craft">craft</text>
+<rect x="64" y="384" width="152.4" height="18" rx="4" fill="#f07020"/>
+<text x="224.37405882745463" y="397" class="value craft">18.38 s <tspan class="ratio">fastest</tspan></text>
+<text x="0" y="423" class="pm">npm</text>
+<rect x="64" y="410" width="522.0" height="18" rx="4" fill="#d0d7de"/>
+<text x="594" y="423" class="value">62.98 s <tspan class="ratio">3.4×</tspan></text>
+<text x="0" y="449" class="pm">pnpm</text>
+<rect x="64" y="436" width="238.8" height="18" rx="4" fill="#d0d7de"/>
+<text x="310.8369505358964" y="449" class="value">28.82 s <tspan class="ratio">1.6×</tspan></text>
+<text x="0" y="475" class="pm">yarn</text>
+<rect x="64" y="462" width="248.4" height="18" rx="4" fill="#d0d7de"/>
+<text x="320.4395497070919" y="475" class="value">29.97 s <tspan class="ratio">1.6×</tspan></text>
+<text x="0" y="526" class="title">Already installed</text>
+<text x="0" y="549" class="pm craft">craft</text>
+<rect x="64" y="536" width="3.4" height="18" rx="4" fill="#f07020"/>
+<text x="75.42986259650618" y="549" class="value craft">5.9 ms <tspan class="ratio">fastest</tspan></text>
+<text x="0" y="575" class="pm">npm</text>
+<rect x="64" y="562" width="390.2" height="18" rx="4" fill="#d0d7de"/>
+<text x="462.2175244638634" y="575" class="value">673 ms <tspan class="ratio">114×</tspan></text>
+<text x="0" y="601" class="pm">pnpm</text>
+<rect x="64" y="588" width="20.5" height="18" rx="4" fill="#d0d7de"/>
+<text x="92.5032950253095" y="601" class="value">35 ms <tspan class="ratio">6.0×</tspan></text>
+<text x="0" y="627" class="pm">yarn</text>
+<rect x="64" y="614" width="522.0" height="18" rx="4" fill="#d0d7de"/>
+<text x="594" y="627" class="value">900 ms <tspan class="ratio">152×</tspan></text>
+</svg>
