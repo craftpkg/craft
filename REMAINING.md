@@ -83,7 +83,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 5.6 | Metadata disk cache (ETag / 304) | P2 | [x] |
 | 5.7 | Registry configuration (`.npmrc`, scopes, auth) | P1 | [x] |
 | 5.8 | Clone whole store entries into `node_modules` | P2 | [x] |
-| 5.9 | Lean packuments: abbreviated, parsed lazily, not all kept (supersedes 5.1) | P2 | [ ] |
+| 5.9 | Lean packuments: abbreviated, parsed lazily, not all kept (supersedes 5.1) | P2 | [x] |
 | 5.10 | Fetch tarballs off the resolution path | P2 | [ ] |
 | 5.11 | Install straight from the lockfile's graph | P2 | [ ] |
 | 5.12 | Extract while downloading | P2 | [ ] |
@@ -708,7 +708,9 @@ Warm-cache installs spend their time in the kernel: `fsutil::copy::copy_tree` cl
 - Packages whose install scripts run keep getting a real copy (`replace_with_copy`).
 - Expected: `large` warm cache with a lockfile, 9 s → about 2 s.
 
-### 5.9 Lean packuments · P2
+### 5.9 Lean packuments · P2 — ✔ done
+
+> Done: craft requests abbreviated packuments and caches each one as `<name>.packument`: a format line, a JSON header holding the dist-tags and every version's offset and length, then the manifests as the registry sent them. Resolving reads only the header, picks a version, and parses only that manifest, re-reading the header from the same open file so a packument another install rewrote meanwhile still reads consistently. The old `<name>.json` is deleted when its packument is written again. Abbreviated manifests lack `libc`, so for a version whose `os` includes `linux` and that declares no `libc`, craft fetches the full manifest from `/<name>/<version>` and caches it for good; `craft.lock` keeps every package's `libc` as before. Measured with `make bench` (no lockfile): warm cache `large` 4.29 → 1.78 s and 5.5 GB → 71 MB (pnpm 1.91 s, 401 MB), `medium` 982 → 229 ms (pnpm 282 ms), `small` 243 → 107 ms (pnpm 147 ms); cold `large` 31.08 → 18.38 s (pnpm 28.82 s) and 5.5 GB → 418 MB; past the `max-age` `large` 8.50 → 7.35 s, still behind pnpm's 1.80 s (5.17).
 
 Without a lockfile, craft peaks at 5.5 GB on `large`. It requests full packuments (no `Accept` header): 1.1 GB on disk for 1,280 names, with vite 37 MB, next 30 MB and firebase 29 MB. It parses every version into `PackageJson`, whose `#[serde(flatten)] other: HashMap<String, Value>` turns each field into a JSON tree. Then it keeps all of them in `NpmResolver.packuments` until the install ends. Abbreviated metadata is far smaller (vite 37 MB → 2.3 MB, firebase 29 → 9.6 MB), but not always (next 30 → 25 MB, from thousands of canaries), so parsing must get lazier too.
 
