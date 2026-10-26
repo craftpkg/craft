@@ -90,7 +90,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 5.13 | One network client, fewer manifest reads, no graph clones | P2 | [ ] |
 | 5.14 | Benchmark: isolate pnpm's store, add a stale-cache scenario | P2 | [x] |
 | 5.15 | Skip freeing memory at exit | P2 | [x] |
-| 5.16 | Link while importing, prune only what changed | P2 | [ ] |
+| 5.16 | Link while importing, prune only what changed | P2 | [x] |
 | 5.17 | Trust fresh-enough metadata (minimum release age) | P2 | [ ] |
 | **Phase 6 — CLI & UX** | | | |
 | 6.1 | Progress output and install summary | P2 | [x] |
@@ -766,7 +766,9 @@ Without a lockfile, `large` spends about 1 s after its last phase dropping 5.8 G
 - At the end of a command, leak the resolver and the graph (`std::mem::forget`) instead of dropping them; the process exits right after and the OS reclaims the memory. Keep the lockfile and state writes before it.
 - Still worth it after 5.9, which shrinks the memory but not the graph.
 
-### 5.16 Link while importing, prune only what changed · P2
+### 5.16 Link while importing, prune only what changed · P2 — ✔ done
+
+> Done: `LinkerPipe` creates every dependency link, the hoisted links and the root links while the imports run, then links bins once the imports are in (linking a bin makes its file executable). Hoisting runs concurrently instead of one link at a time. Pruning is skipped when `node_modules` didn't exist before the install; otherwise `prune_to_graph` keeps exactly the graph's entries and roots, without following every link in the virtual store. `craft remove` still prunes by reachability. Measured with `make bench` (warm cache and lockfile): `large` 1.97 → 1.72 s (pnpm 1.80 s), `medium` 254 → 217 ms (pnpm 246 ms), `small` 135 → 103 ms (pnpm 128 ms); without a lockfile, `large` 4.47 → 4.29 s. Short of the 1.3 s expected: dependency links compete with the clones and finish only about 60 ms after them. What's left besides the clones is the scripts scan (0.155 s) and copying the graph into the linker (about 0.06–0.1 s), both in 5.13.
 
 After 5.8, `large` with a warm cache and a lockfile takes 1.97 s against pnpm's 1.85 s. Measured breakdown: resolving from the lockfile 60–90 ms, cloning 1,249 entries 1.22–1.35 s, linking dependencies 0.19 s, hoisting 0.14 s, pruning 0.20 s, the scripts scan 0.15 s (5.13). The clone is a floor: one `clonefile` per entry takes 1.15–1.20 s on 1 to 32 threads, as APFS serializes them (hardlinking the same files took 13.5 s). pnpm 12 is a native binary that calls the same `clonefile`, so craft wins only by cutting the rest.
 
