@@ -1,6 +1,6 @@
 # Craft — Remaining Work
 
-Status of the Rust package manager as of **2026-10-25**, and the ordered list of work needed to finalize it.
+Status of the Rust package manager as of **2026-10-26**, and the ordered list of work needed to finalize it.
 Work through tasks top to bottom: each phase unblocks the next. Tick a task's box when it is merged.
 
 **Known-bug tests:** every open bug that has a scenario is an `#[ignore = "fixed by <task>: …"]` end-to-end test in
@@ -82,12 +82,16 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 5.5 | Streaming downloads (hash while writing) | P2 | [x] |
 | 5.6 | Metadata disk cache (ETag / 304) | P2 | [x] |
 | 5.7 | Registry configuration (`.npmrc`, scopes, auth) | P1 | [x] |
-| 5.8 | Clone whole store entries into `node_modules` | P2 | [ ] |
+| 5.8 | Clone whole store entries into `node_modules` | P2 | [x] |
 | 5.9 | Lean packuments: abbreviated, parsed lazily, not all kept (supersedes 5.1) | P2 | [ ] |
 | 5.10 | Fetch tarballs off the resolution path | P2 | [ ] |
 | 5.11 | Install straight from the lockfile's graph | P2 | [ ] |
 | 5.12 | Extract while downloading | P2 | [ ] |
 | 5.13 | One network client, fewer manifest reads, no graph clones | P2 | [ ] |
+| 5.14 | Benchmark: isolate pnpm's store, add a stale-cache scenario | P2 | [ ] |
+| 5.15 | Skip freeing memory at exit | P2 | [ ] |
+| 5.16 | Link while importing, prune only what changed | P2 | [ ] |
+| 5.17 | Trust fresh-enough metadata (minimum release age) | P2 | [ ] |
 | **Phase 6 — CLI & UX** | | | |
 | 6.1 | Progress output and install summary | P2 | [x] |
 | 6.2 | Error reporting (no panics, contextual messages) | P2 | [x] |
@@ -643,7 +647,7 @@ README says "`package-lock.json` support (coming soon)" — decide whether that 
 
 Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm ≈ 3.3 s.
 
-**Benchmark findings (2026-10-25).** `make bench` (`bench/README.md`) races craft against npm, pnpm and Yarn. craft wins already-installed projects by 6–140×, but loses every warm-cache scenario to pnpm by 2–6×, cold installs of `large` by 2.6×, and peaks at 5.5 GB without a lockfile (pnpm: 663 MB). Profiling `large` (1,391 packages, 112,916 files) traced it to four causes, fixed by 5.8–5.13 in this order. After each, run `make` and `make bench`, and update the tables in `bench/README.md`. Memory budget for `large`: under 500 MB peak without a lockfile, under 150 MB with one; every new concurrent stage reuses an existing limit.
+**Benchmark findings (2026-10-25).** `make bench` (`bench/README.md`) races craft against npm, pnpm and Yarn. craft wins already-installed projects by 6–140×, but loses every warm-cache scenario to pnpm by 2–6×, cold installs of `large` by 2.6×, and peaks at 5.5 GB without a lockfile (pnpm: 663 MB). Profiling `large` (1,391 packages, 112,916 files) traced it to four causes, fixed by 5.8–5.13. A second round after 5.8 (2026-10-26) added 5.14–5.17; work through them as 5.14, 5.15, 5.16, 5.9, 5.17, then 5.10–5.13. After each, run `make` and `make bench`, and update the tables in `bench/README.md`. Memory budget for `large`: under 500 MB peak without a lockfile, under 150 MB with one; every new concurrent stage reuses an existing limit.
 
 ### 5.1 Abbreviated packuments · P2 — ⏸ deferred, superseded by 5.9
 
@@ -693,7 +697,9 @@ Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm
 - URL-encode scoped names: `@scope%2fname`.
 - Never log tokens (verbose mode prints URLs).
 
-### 5.8 Clone whole store entries · P2
+### 5.8 Clone whole store entries · P2 — ✔ done
+
+> Done: on macOS, `fsutil::import_dir` clones a store entry into its staging directory with one `clonefile` call (through `reflink-copy`) and renames it in as before. When the filesystem can't (not APFS, another volume) it falls back to the per-file clone → hardlink → copy path for the rest of the process; other failures fall back for that package only. Copies that skip entries (`file:` directories) stay per file. Measured with `make bench` (warm cache and lockfile): `large` 9.03 s → 1.97 s (pnpm 1.85 s), `medium` 756 → 254 ms (pnpm 271 ms), `small` 286 → 135 ms (pnpm 212 ms); without a lockfile `large` 12.78 → 5.54 s. Memory unchanged. Linux is unchanged and still unmeasured.
 
 Warm-cache installs spend their time in the kernel: `fsutil::copy::copy_tree` clones file by file, 112,916 `clonefileat` calls for `large`. A warm-cache install with a lockfile measured 16 s wall, 0.5 s user, 48 s sys and 491k involuntary context switches. Cloning the same store per file took 15.9 s on one thread and about 9 s on 4–16 threads; `clonefile()` once per package directory took **1.15 s** for all 1,246 entries.
 
@@ -708,6 +714,8 @@ Without a lockfile, craft peaks at 5.5 GB on `large`. It requests full packument
 
 - Send `Accept: application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*`, and give the metadata cache a new directory for the new format.
 - Parse `versions` as raw JSON (`Box<RawValue>`); select from the keys and `dist-tags`; fully parse only the chosen version into a typed manifest without a flattened catch-all map. Keep only that per name.
+- Store it like pnpm's `pnpm-meta-v1` cache: each file starts with a small index of `dist-tags` and every version with the byte offset and length of its manifest, so resolution reads the index, picks a version, and parses only that version's bytes.
+- Measured 2026-10-26 (`large`, fresh cache): resolution takes 2.6 s and about 3 s of CPU, almost all of it reading and parsing 1.1 GB of JSON; pnpm resolves the same tree in about 0.15 s from its indexed cache. Expected: a few hundred milliseconds, peak memory under 500 MB.
 - `libc`, which 5.1 was deferred over: abbreviated manifests lack it, so a package for the other Linux libc is downloaded, then skipped once its own `package.json` shows `libc`. That costs a few small downloads on Linux and never installs the wrong package. Scripts are already read from the installed `package.json`.
 
 ### 5.10 Fetch tarballs off the resolution path · P2
@@ -737,6 +745,38 @@ Each tarball is written to disk, reopened and extracted, with a `create_dir_all`
 - The graph is cloned whole into the linker and the scripts pass, every node carrying its manifest; borrow it or share it behind an `Arc`.
 - Then tune metadata concurrency over HTTP/2 against the benchmark rather than by guess.
 - `bench/report.mjs`: report peak memory for every fixture, so each change is judged on time and memory.
+- The scripts scan is 0.15 s of a 1.97 s install on `large` with a lockfile (measured 2026-10-26).
+
+### 5.14 Benchmark: isolate pnpm's store, add a stale-cache scenario · P2
+
+pnpm keeps its store under `PNPM_HOME`, not `HOME`, so a `PNPM_HOME` exported by the shell leaks into the benchmark: every run so far used and wrote to the user's own `~/Library/pnpm/store/v11` (25 GB). pnpm's cold and lockfile-with-empty-cache rows therefore had its tarballs already; its warm rows are unaffected.
+
+- Set `PNPM_HOME` to the package manager's own home in `install_command`, and check for other variables that leak the same way (`npm_config_*`, `YARN_*`, `COREPACK_*`).
+- Re-run the cold and lockfile scenarios and replace those rows in `bench/README.md`.
+- Add a scenario whose metadata cache is older than the registry's `max-age` (300 s). In the warm-cache scenario every run lands within it, which hides that craft then revalidates every packument: 22–24 s on `large`, against pnpm's 2.0 s.
+
+### 5.15 Skip freeing memory at exit · P2
+
+Without a lockfile, `large` spends about 1 s after its last phase dropping 5.8 GB of parsed packuments and the graph. Leaving the resolver undropped took the install from 5.62 s to 4.65 s.
+
+- At the end of a command, leak the resolver and the graph (`std::mem::forget`) instead of dropping them; the process exits right after and the OS reclaims the memory. Keep the lockfile and state writes before it.
+- Still worth it after 5.9, which shrinks the memory but not the graph.
+
+### 5.16 Link while importing, prune only what changed · P2
+
+After 5.8, `large` with a warm cache and a lockfile takes 1.97 s against pnpm's 1.85 s. Measured breakdown: resolving from the lockfile 60–90 ms, cloning 1,249 entries 1.22–1.35 s, linking dependencies 0.19 s, hoisting 0.14 s, pruning 0.20 s, the scripts scan 0.15 s (5.13). The clone is a floor: one `clonefile` per entry takes 1.15–1.20 s on 1 to 32 threads, as APFS serializes them (hardlinking the same files took 13.5 s). pnpm 12 is a native binary that calls the same `clonefile`, so craft wins only by cutting the rest.
+
+- Link each entry's dependencies as soon as that entry is imported, and run hoisting and the root links concurrently, not one link at a time. Symlinking mostly overlaps with clones: 1.20 s + 0.26 s apart, 1.35 s together.
+- Skip pruning when `node_modules` didn't exist before the install. On an update, prune what the previous `node_modules/.craft/state` has and the new graph lacks, instead of reading every link in the virtual store.
+- Expected with 5.13's scripts scan: `large` about 1.3 s, ahead of pnpm. The same applies without a lockfile, where linking takes 1.8 s.
+- Below the clone floor only a shared global virtual store would go (projects symlink entries in a store-wide `links` directory, as pnpm's opt-in global virtual store does). It breaks packages that rely on undeclared dependencies, so leave it for later, opt-in.
+
+### 5.17 Trust fresh-enough metadata (minimum release age) · P2
+
+Once a cached packument is older than its `max-age` (300 s on the npm registry), craft revalidates it before resolving, one dependency level at a time and 16 at a time, and any packument that changed comes back in full: 22–24 s for `large`. pnpm installed the same project without a lockfile in 2.0 s from a cache about 21 hours old, with no network connections at all (sampled throughout the install, and it also succeeded against an unreachable registry). Its cache records `minimumReleaseAge: 1440`. When versions younger than that age aren't eligible, a packument cached more recently than that age already lists every version resolution may choose.
+
+- Add `minimum-release-age` (pnpm's `.npmrc` key, in minutes): versions published more recently are skipped while resolving, which also protects against freshly published malicious versions. Use a cached packument without asking while it is younger than that age. Whether craft defaults to pnpm's one day is a behaviour change to decide.
+- Without it, still revalidate every name the cache holds in parallel, ahead of the dependency walk instead of level by level. 5.9's abbreviated metadata keeps the changed responses small.
 
 ---
 
