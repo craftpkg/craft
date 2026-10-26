@@ -89,7 +89,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 5.12 | Extract while downloading | P2 | [ ] |
 | 5.13 | One network client, fewer manifest reads, no graph clones | P2 | [ ] |
 | 5.14 | Benchmark: isolate pnpm's store, add a stale-cache scenario | P2 | [x] |
-| 5.15 | Skip freeing memory at exit | P2 | [ ] |
+| 5.15 | Skip freeing memory at exit | P2 | [x] |
 | 5.16 | Link while importing, prune only what changed | P2 | [ ] |
 | 5.17 | Trust fresh-enough metadata (minimum release age) | P2 | [ ] |
 | **Phase 6 — CLI & UX** | | | |
@@ -757,7 +757,9 @@ pnpm keeps its store under `PNPM_HOME`, not `HOME`, so a `PNPM_HOME` exported by
 - Re-run the cold and lockfile scenarios and replace those rows in `bench/README.md`.
 - Add a scenario whose metadata cache is older than the registry's `max-age` (300 s). In the warm-cache scenario every run lands within it, which hides that craft then revalidates every packument: 22–24 s on `large`, against pnpm's 2.0 s.
 
-### 5.15 Skip freeing memory at exit · P2
+### 5.15 Skip freeing memory at exit · P2 — ✔ done
+
+> Done: `InstallPipe::into_graph` resolves the graph and then leaks the pipe, with the resolver's packuments, instead of dropping it; `install`, `update` and `add` use it. Measured with `make bench` (no lockfile): warm cache `large` 5.54 → 4.47 s, `medium` 1.37 → 1.02 s, `small` 307 → 263 ms; past the `max-age` `large` 9.72 → 8.50 s. Peak memory unchanged (5.9). While measuring, the `large` warm-cache runs turned out to cross the registry's `max-age` mid-run, since setting up all four package managers takes about 4.7 minutes: `bench/run.sh` now times each package manager on its own and sets it up again right before its warm-cache runs.
 
 Without a lockfile, `large` spends about 1 s after its last phase dropping 5.8 GB of parsed packuments and the graph. Leaving the resolver undropped took the install from 5.62 s to 4.65 s.
 
