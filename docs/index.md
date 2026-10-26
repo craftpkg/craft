@@ -23,6 +23,8 @@ features:
   - icon: ⚡
     title: Fast
     details: Parallel resolution and downloads, registry metadata cached on disk and revalidated with ETags, and packages cloned from a global store. An unchanged project installs in milliseconds.
+    link: /guide/benchmarks
+    linkText: See the benchmarks
   - icon: 🔒
     title: Deterministic
     details: craft.lock records every resolved version, tarball and integrity hash. Frozen installs, the default in CI, install exactly that.
@@ -55,3 +57,11 @@ craft run build        # run a script
 ```
 
 See [Installation](/guide/installation) for release binaries, Windows and building from source.
+
+## Benchmarks
+
+craft against npm, pnpm and Yarn on the largest project in the benchmark:
+
+<BenchmarkChart fixture="large" :scenarios="['cache+lockfile', 'cache', 'cold', 'up-to-date']" />
+
+Every project, scenario and peak memory, and how it's kept fair: [Benchmarks](/guide/benchmarks).
