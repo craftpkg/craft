@@ -8,7 +8,7 @@ on:
         default: small,medium,large
       scenarios:
         description: Scenarios to time
-        default: cold,lockfile,cache,cache+lockfile,up-to-date
+        default: cold,lockfile,cache,cache+lockfile,up-to-date,stale
       runs:
         description: Timed runs per scenario
         default: "5"
