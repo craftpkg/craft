@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -30,6 +31,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Bump version and push tag
+        id: bump
         run: |
           # Get the latest tag, default to 0.0.0 if none exists
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
@@ -66,3 +68,10 @@ jobs:
           # Create and push the new tag
           git tag $NEW_TAG
           git push origin $NEW_TAG
+          echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+
+      # A tag pushed with GITHUB_TOKEN doesn't trigger the Release workflow, but a dispatch does.
+      - name: Start the release build
+        run: gh workflow run release.yml --ref "${{ steps.bump.outputs.tag }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
