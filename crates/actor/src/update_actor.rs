@@ -59,7 +59,7 @@ impl Actor<UpdatePayload> for UpdateActor {
         let preferred = lockfile.as_ref().filter(|_| !updates_everything);
         let graph = InstallPipe::new(&self.context, packages)
             .with_lockfile(preferred)
-            .run()
+            .into_graph()
             .await?;
         LinkerPipe::new(&self.context, graph.clone()).run().await?;
         let policy = script_policy(&package_json, false);
