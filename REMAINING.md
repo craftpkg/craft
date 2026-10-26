@@ -88,7 +88,7 @@ no lifecycle scripts, `craft run` doesn't put `.bin` on `PATH`.
 | 5.11 | Install straight from the lockfile's graph | P2 | [ ] |
 | 5.12 | Extract while downloading | P2 | [ ] |
 | 5.13 | One network client, fewer manifest reads, no graph clones | P2 | [ ] |
-| 5.14 | Benchmark: isolate pnpm's store, add a stale-cache scenario | P2 | [ ] |
+| 5.14 | Benchmark: isolate pnpm's store, add a stale-cache scenario | P2 | [x] |
 | 5.15 | Skip freeing memory at exit | P2 | [ ] |
 | 5.16 | Link while importing, prune only what changed | P2 | [ ] |
 | 5.17 | Trust fresh-enough metadata (minimum release age) | P2 | [ ] |
@@ -647,7 +647,7 @@ README says "`package-lock.json` support (coming soon)" — decide whether that 
 
 Measured: cold install of this repo's `package.json` ≈ 4.8 s, 149 MB RSS; warm ≈ 3.3 s.
 
-**Benchmark findings (2026-10-25).** `make bench` (`bench/README.md`) races craft against npm, pnpm and Yarn. craft wins already-installed projects by 6–140×, but loses every warm-cache scenario to pnpm by 2–6×, cold installs of `large` by 2.6×, and peaks at 5.5 GB without a lockfile (pnpm: 663 MB). Profiling `large` (1,391 packages, 112,916 files) traced it to four causes, fixed by 5.8–5.13. A second round after 5.8 (2026-10-26) added 5.14–5.17; work through them as 5.14, 5.15, 5.16, 5.9, 5.17, then 5.10–5.13. After each, run `make` and `make bench`, and update the tables in `bench/README.md`. Memory budget for `large`: under 500 MB peak without a lockfile, under 150 MB with one; every new concurrent stage reuses an existing limit.
+**Benchmark findings (2026-10-25).** `make bench` (`bench/README.md`) races craft against npm, pnpm and Yarn. craft wins already-installed projects by 6–140×, but loses every warm-cache scenario to pnpm by 2–6×, cold installs of `large` by 2.6× (an artefact: pnpm was reaching its existing store, see 5.14), and peaks at 5.5 GB without a lockfile (pnpm: 663 MB). Profiling `large` (1,391 packages, 112,916 files) traced it to four causes, fixed by 5.8–5.13. A second round after 5.8 (2026-10-26) added 5.14–5.17; work through them as 5.14, 5.15, 5.16, 5.9, 5.17, then 5.10–5.13. After each, run `make` and `make bench`, and update the tables in `bench/README.md`. Memory budget for `large`: under 500 MB peak without a lockfile, under 150 MB with one; every new concurrent stage reuses an existing limit.
 
 ### 5.1 Abbreviated packuments · P2 — ⏸ deferred, superseded by 5.9
 
@@ -720,7 +720,7 @@ Without a lockfile, craft peaks at 5.5 GB on `large`. It requests full packument
 
 ### 5.10 Fetch tarballs off the resolution path · P2
 
-`InstallPipe::resolve_package` downloads and extracts a package before resolving its dependencies, so a cold install's critical path is tree depth × (metadata request + download + extraction): 37 s for `large` against pnpm's 14 s.
+`InstallPipe::resolve_package` downloads and extracts a package before resolving its dependencies, so a cold install's critical path is tree depth × (metadata request + download + extraction): 31–37 s for `large`, level with Yarn's 30 s, while 5.11's empty-cache install with a lockfile shows the same waterfall at 20 s against npm's 12 s.
 
 - Resolve dependencies from the packument as soon as a version is chosen; start each tarball's fetch as its own task, bounded by the network and extraction permits, and join them all before linking.
 
@@ -747,7 +747,9 @@ Each tarball is written to disk, reopened and extracted, with a `create_dir_all`
 - `bench/report.mjs`: report peak memory for every fixture, so each change is judged on time and memory.
 - The scripts scan is 0.15 s of a 1.97 s install on `large` with a lockfile (measured 2026-10-26).
 
-### 5.14 Benchmark: isolate pnpm's store, add a stale-cache scenario · P2
+### 5.14 Benchmark: isolate pnpm's store, add a stale-cache scenario · P2 — ✔ done
+
+> Done: `bench/run.sh` gives pnpm `PNPM_HOME` inside its own home and unsets `npm_config_*`, `PNPM_*`, `YARN_*` and `COREPACK_*` from the caller's environment. The new `stale` scenario copies each home right after setup, waits until the registry's 300 s `max-age` has passed, and restores the copy before every run. Re-measured 2026-10-26: pnpm's cold install of `large` is 43.65 s, not 14.26 s, and craft (31.08 s) is level with Yarn (29.80 s); past the `max-age`, `large` takes craft 9.72 s, npm 40.50 s, Yarn 10.46 s and pnpm 1.79 s.
 
 pnpm keeps its store under `PNPM_HOME`, not `HOME`, so a `PNPM_HOME` exported by the shell leaks into the benchmark: every run so far used and wrote to the user's own `~/Library/pnpm/store/v11` (25 GB). pnpm's cold and lockfile-with-empty-cache rows therefore had its tarballs already; its warm rows are unaffected.
 
