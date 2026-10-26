@@ -2,8 +2,8 @@ use std::fmt::Display;
 use std::path::PathBuf;
 
 use crate::DependencySection;
+pub use crate::PackageJson;
 use crate::dependency_spec::{is_location, split_name_and_spec};
-pub use crate::{NpmPackage, PackageJson};
 
 #[derive(Debug, Clone)]
 pub struct InstallPackage {
