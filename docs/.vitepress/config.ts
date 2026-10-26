@@ -30,6 +30,7 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/guide/introduction', activeMatch: '/guide/' },
       { text: 'CLI', link: '/reference/cli', activeMatch: '/reference/' },
+      { text: 'Benchmarks', link: '/guide/benchmarks' },
       { text: 'Contributing', link: '/contributing/', activeMatch: '/contributing/' },
     ],
 
@@ -41,6 +42,7 @@ export default defineConfig({
             { text: 'Introduction', link: '/guide/introduction' },
             { text: 'Installation', link: '/guide/installation' },
             { text: 'Quick start', link: '/guide/getting-started' },
+            { text: 'Benchmarks', link: '/guide/benchmarks' },
           ],
         },
         {
