@@ -24,6 +24,19 @@ export default defineConfig({
   cleanUrls: true,
   head: [['link', { rel: 'icon', type: 'image/png', href: '/craft/logo.png' }]],
 
+  markdown: {
+    config(md) {
+      const fence = md.renderer.rules.fence!
+      md.renderer.rules.fence = (tokens, index, options, env, renderer) => {
+        const token = tokens[index]
+        if (token.info.trim() === 'mermaid') {
+          return `<MermaidDiagram graph="${encodeURIComponent(token.content)}" />`
+        }
+        return fence(tokens, index, options, env, renderer)
+      }
+    },
+  },
+
   themeConfig: {
     logo: '/logo.png',
 
@@ -31,7 +44,7 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/introduction', activeMatch: '/guide/' },
       { text: 'CLI', link: '/reference/cli', activeMatch: '/reference/' },
       { text: 'Benchmarks', link: '/guide/benchmarks' },
-      { text: 'Contributing', link: '/contributing/', activeMatch: '/contributing/' },
+      { text: 'Developers', link: '/developers/anatomy', activeMatch: '/developers/' },
     ],
 
     sidebar: {
@@ -78,13 +91,19 @@ export default defineConfig({
           ],
         },
       ],
-      '/contributing/': [
+      '/developers/': [
+        {
+          text: 'How craft works',
+          items: [
+            { text: 'Anatomy', link: '/developers/anatomy' },
+            { text: 'Architecture', link: '/developers/architecture' },
+          ],
+        },
         {
           text: 'Contributing',
           items: [
-            { text: 'Overview', link: '/contributing/' },
-            { text: 'Architecture', link: '/contributing/architecture' },
-            { text: 'Testing', link: '/contributing/testing' },
+            { text: 'Getting set up', link: '/developers/' },
+            { text: 'Testing', link: '/developers/testing' },
           ],
         },
       ],
