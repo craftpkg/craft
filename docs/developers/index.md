@@ -22,7 +22,7 @@ cargo run -p craft -- install   # run your build of craft
 3. Keep `make` green. Clippy runs with `-D warnings`, and `unwrap` / `expect` are denied outside tests.
 4. Open a pull request against `main`.
 
-`REMAINING.md` at the repository root tracks what's planned, with the reasoning behind each task.
+`REMAINING.md` at the repository root tracks what's planned, with the reasoning behind each task. To find your way around the code, start with [Anatomy](./anatomy), then the crate map in [Architecture](./architecture).
 
 ## Documentation
 
