@@ -90,3 +90,5 @@ craft records what it installed in `node_modules/.craft/state`. When `package.js
 - Tarballs are hashed as they stream to disk, so even a large install needs little memory.
 
 See [Configuration](./configuration) for the settings.
+
+For how craft does all this internally, and why it's fast, see [Anatomy](../developers/anatomy) in the developer docs.

@@ -63,7 +63,7 @@ Every command is documented in the [CLI reference](https://craftpkg.github.io/cr
 
 ## 🤝 Contributing
 
-Contributions are welcome! `make` runs formatting, lints and the full test suite. See [Contributing](https://craftpkg.github.io/craft/contributing/) for the architecture, the test suites and how to work on the docs.
+Contributions are welcome! `make` runs formatting, lints and the full test suite. See the [developer docs](https://craftpkg.github.io/craft/developers/anatomy) for how craft works inside, the test suites and how to work on the docs.
 
 ## 📄 License
 
